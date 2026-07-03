@@ -41,14 +41,20 @@ jobs:
             modules: "."
           - repo: mtgo-cli
             modules: "."
+          - repo: mtgo-ipc
+            modules: "."
+          - repo: session-converter
+            modules: "."
+          - repo: device-manager
+            modules: "."
           - repo: plugins
-            modules: "conversations i18n"
+            modules: "conversations i18n scheduler fsm throttle updatesrecovery rawdebug"
           - repo: plugins-template
             modules: "."
           - repo: middlewares-template
             modules: "."
           - repo: middlewares
-            modules: "floodwait ratelimit"
+            modules: "floodwait ratelimit metrics timeout"
 
     steps:
       - name: Resolve version

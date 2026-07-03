@@ -97,6 +97,11 @@ type Client struct {
 	mwCache            []Middleware
 	invokerMiddlewares []InvokerMiddleware
 	invokerCache       *tg.RPCClient
+	hooksMu             sync.RWMutex
+	updateReceivedHooks []UpdateReceivedHook
+	sessionLoadedHooks  []SessionLoadedHook
+	connectedHooks      []ConnectedHook
+	reconnectHooks      []ReconnectHook
 
 	peerCache          map[int64]tg.InputPeerClass
 	peerCacheMu        sync.RWMutex
@@ -286,6 +291,8 @@ func NewClient(apiID int32, apiHash string, cfg *Config) (*Client, error) {
 		})
 	}
 
+
+	client.initDeviceStorage()
 	registerClient(client)
 
 	return client, nil
@@ -1566,6 +1573,8 @@ func (c *Client) postConnect() {
 			c.Log.Debug("outbound container packing enabled")
 		}
 	}
+	// Notify session-loaded hooks before any update processing.
+	c.fireSessionLoaded()
 
 	if !c.config().NoUpdates {
 		c.Log.Debug("fetching updates state")
@@ -1614,6 +1623,9 @@ func (c *Client) postConnect() {
 			c.Log.Info("update recovery enabled")
 		}
 	}
+
+	// Notify connected hooks after all post-connect setup is done.
+	c.fireConnected()
 }
 
 func (c *Client) processRawUpdate(obj tg.TLObject) {
@@ -1621,6 +1633,11 @@ func (c *Client) processRawUpdate(obj tg.TLObject) {
 	if !ok {
 		return
 	}
+
+	// Notify lifecycle hooks before routing. Plugins use this for state
+	// tracking and gap detection. Hooks must be non-blocking.
+	c.fireUpdateReceived(updates)
+
 	c.mu.RLock()
 	um := c.updateManager
 	c.mu.RUnlock()
