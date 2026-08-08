@@ -1399,6 +1399,21 @@ func (c *Client) connectTransportLocked(timeout time.Duration) (retErr error) {
 	}
 
 	dc := sess.DC()
+	
+	// Flood-gate the initial connection just like the reconnect loop does
+	// (reconnect.go:1155). Without this, a burst of Connect() calls across
+	// many clients can trigger server-side transport 429 / connection drops
+	// (EOF during PFS DH exchange) before the reconnect loop ever runs.
+	if fg := c.floodGate; fg != nil {
+		// Use a short deadline so the gate doesn't block forever; the caller
+		// already owns autoConnectMu and will retry via the reconnect loop.
+		gCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := fg.wait(gCtx); err != nil {
+			return err
+		}
+	}
+
 	sessionTp, err := c.dialTransport(dc, timeout, testDialer)
 	if err != nil {
 		return err
