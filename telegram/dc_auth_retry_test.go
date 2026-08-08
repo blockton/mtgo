@@ -8,9 +8,9 @@ import (
 	"github.com/mtgo-labs/mtgo/tgerr"
 )
 
-func TestRetryDCAuthorizationRetriesFloodWait(t *testing.T) {
+func TestRetryFloodWaitRetriesFloodWait(t *testing.T) {
 	attempts := 0
-	err := retryDCAuthorization(context.Background(), func() error {
+	err := retryFloodWait(context.Background(), func() error {
 		attempts++
 		if attempts == 1 {
 			return tgerr.New(420, "FLOOD_WAIT_0")
@@ -25,12 +25,12 @@ func TestRetryDCAuthorizationRetriesFloodWait(t *testing.T) {
 	}
 }
 
-func TestRetryDCAuthorizationHonorsCancellation(t *testing.T) {
+func TestRetryFloodWaitHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	attempts := 0
-	err := retryDCAuthorization(ctx, func() error {
+	err := retryFloodWait(ctx, func() error {
 		attempts++
 		return tgerr.New(420, "FLOOD_WAIT_75")
 	})
@@ -42,10 +42,10 @@ func TestRetryDCAuthorizationHonorsCancellation(t *testing.T) {
 	}
 }
 
-func TestRetryDCAuthorizationReturnsNonFloodError(t *testing.T) {
+func TestRetryFloodWaitReturnsNonFloodError(t *testing.T) {
 	want := errors.New("authorization failed")
 	attempts := 0
-	err := retryDCAuthorization(context.Background(), func() error {
+	err := retryFloodWait(context.Background(), func() error {
 		attempts++
 		return want
 	})

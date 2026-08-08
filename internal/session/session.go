@@ -997,19 +997,22 @@ func (s *Session) dispatchUpdate(obj tg.TLObject) {
 	}
 	go func() {
 		defer func() { <-s.updateSem }()
-		defer func() {
-			if r := recover(); r != nil {
-				if panicFn != nil {
-					panicFn(r)
-				} else {
-					if s.log != nil {
-						s.log.Errorf("dispatchUpdate panic: %v", r)
-					}
-				}
-			}
-		}()
+		defer s.recoverPanic("dispatchUpdate", panicFn)
 		handlerFn(obj)
 	}()
+}
+
+// recoverPanic catches panics from a dispatch goroutine, routes them to the
+// session's onPanic callback, and falls back to logging. Shared by
+// dispatchUpdate and dispatchRaw.
+func (s *Session) recoverPanic(name string, panicFn func(any)) {
+	if r := recover(); r != nil {
+		if panicFn != nil {
+			panicFn(r)
+		} else if s.log != nil {
+			s.log.Errorf("%s panic: %v", name, r)
+		}
+	}
 }
 
 // SendRaw encrypts and sends raw body bytes as a single MTProto message, then
@@ -1350,6 +1353,12 @@ func (s *Session) Invoke(ctx context.Context, query tg.TLObject, retries int, ti
 }
 
 func unwrapSessionRPCQuery(query tg.TLObject) tg.TLObject {
+	return UnwrapRPCQuery(query)
+}
+
+// UnwrapRPCQuery peels back helper wrapper layers (InvokeWithLayer,
+// InitConnection, InvokeAfterMsg, etc.) to reach the inner user request.
+func UnwrapRPCQuery(query tg.TLObject) tg.TLObject {
 	for query != nil {
 		switch wrapped := query.(type) {
 		case *tg.InvokeWithLayerRequest:
@@ -2229,17 +2238,7 @@ func (s *Session) dispatchRaw(raw *tg.MTProtoMessageRaw) {
 	s.mu.RLock()
 	panicFn := s.onPanic
 	s.mu.RUnlock()
-	defer func() {
-		if r := recover(); r != nil {
-			if panicFn != nil {
-				panicFn(r)
-			} else {
-				if s.log != nil {
-					s.log.Errorf("dispatchRaw panic: %v", r)
-				}
-			}
-		}
-	}()
+	defer s.recoverPanic("dispatchRaw", panicFn)
 	bodyReader := tg.NewReader(raw.BodyRaw)
 	defer tg.ReleaseReader(bodyReader)
 	body, err := tg.ReadTLObject(bodyReader)

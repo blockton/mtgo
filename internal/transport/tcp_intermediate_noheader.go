@@ -29,14 +29,7 @@ func (t *TCPIntermediateNoHeader) Connect() error {
 func (t *TCPIntermediateNoHeader) Conn() net.Conn { return t.conn }
 
 func (t *TCPIntermediateNoHeader) Send(buf *bytes.Buffer) error {
-	data := buf.Bytes()
-
-	packet := make([]byte, 4+len(data))
-	binary.LittleEndian.PutUint32(packet[:4], uint32(len(data)))
-	copy(packet[4:], data)
-
-	_, err := t.conn.Write(packet)
-	return err
+	return send4ByteLengthPrefix(t.conn, buf)
 }
 
 func (t *TCPIntermediateNoHeader) Recv() ([]byte, error) {

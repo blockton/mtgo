@@ -488,7 +488,7 @@ func firstQuery(queries []tg.TLObject) tg.TLObject {
 }
 
 func (c *Client) replaySafe(query tg.TLObject) bool {
-	query = unwrapRPCQuery(query)
+	query = session.UnwrapRPCQuery(query)
 	if query == nil {
 		return false
 	}
@@ -518,32 +518,9 @@ func (c *Client) replaySafe(query tg.TLObject) bool {
 	return false
 }
 
-func unwrapRPCQuery(query tg.TLObject) tg.TLObject {
-	for query != nil {
-		switch wrapped := query.(type) {
-		case *tg.InvokeWithLayerRequest:
-			query = wrapped.Query
-		case *tg.InitConnectionRequest:
-			query = wrapped.Query
-		case *tg.InvokeAfterMsgRequest:
-			query = wrapped.Query
-		case *tg.InvokeAfterMsgsRequest:
-			query = wrapped.Query
-		case *tg.InvokeWithoutUpdatesRequest:
-			query = wrapped.Query
-		case *tg.InvokeWithTakeoutRequest:
-			query = wrapped.Query
-		case *tg.InvokeWithBusinessConnectionRequest:
-			query = wrapped.Query
-		default:
-			return query
-		}
-	}
-	return nil
-}
 
 func rpcQueryName(query tg.TLObject) string {
-	query = unwrapRPCQuery(query)
+	query = session.UnwrapRPCQuery(query)
 	if query == nil {
 		return "unknown"
 	}

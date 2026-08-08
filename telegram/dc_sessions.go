@@ -744,7 +744,7 @@ func (c *Client) createDCSession(
 		return nil, ErrNotConnected
 	}
 	var exportResult *tg.AuthExportedAuthorization
-	err = retryDCAuthorization(ctx, func() error {
+	err = retryFloodWait(ctx, func() error {
 		var exportErr error
 		exportResult, exportErr = c.Raw().AuthExportAuthorization(ctx, &tg.AuthExportAuthorizationRequest{
 			DCID: int32(dcID),
@@ -756,7 +756,7 @@ func (c *Client) createDCSession(
 		sessionTp.Close()
 		return nil, fmt.Errorf("download: export auth for DC %d: %w", dcID, err)
 	}
-	err = retryDCAuthorization(ctx, func() error {
+	err = retryFloodWait(ctx, func() error {
 		_, importErr := rpc.AuthImportAuthorization(ctx, &tg.AuthImportAuthorizationRequest{
 			ID:    exportResult.ID,
 			Bytes: exportResult.Bytes,
@@ -772,10 +772,6 @@ func (c *Client) createDCSession(
 	c.Log.Infof("Auth transfer complete for DC %d", dcID)
 
 	return entry, nil
-}
-
-func retryDCAuthorization(ctx context.Context, call func() error) error {
-	return retryFloodWait(ctx, call)
 }
 
 type dcSessionInvoker struct {
