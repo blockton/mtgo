@@ -1432,8 +1432,8 @@ client.OnSecretMessage(func(chat *telegram.SecretChat, layer *e2e.DecryptedMessa
 ### RPC Layer
 
 ```go
-func (c *Client) Invoke(query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error)
-func (c *Client) InvokeRaw(query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error)
+func (c *Client) Invoke(ctx context.Context, query tg.TLObject) (tg.TLObject, error)
+func (c *Client) InvokeRaw(ctx context.Context, query tg.TLObject) (tg.TLObject, error)
 func (c *Client) InvokeWithRawResult(ctx context.Context, query tg.TLObject) ([]byte, error)
 func (c *Client) InvokeJSON(ctx context.Context, functionName string, payload []byte, useSnakeCase bool) ([]byte, error)
 func (c *Client) Raw() *tg.RPCClient
@@ -3471,7 +3471,7 @@ func (s *Session) SetSaltRefreshMin(d time.Duration)
 func (s *Session) SetLogger(l sessionLogger)
 func (s *Session) SetWriteBreakerThreshold(n int)
 func (s *Session) Send(msgID int64, seqNo uint32, body tg.TLObject, timeout time.Duration) ([]byte, error)
-func (s *Session) Invoke(query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error)
+func (s *Session) Invoke(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error)
 func (s *Session) Start(timeout time.Duration) error
 func (s *Session) Stop()
 func (s *Session) Connect(transport Transport, timeout time.Duration) error

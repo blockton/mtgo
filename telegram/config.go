@@ -246,9 +246,12 @@ type Config struct {
 	// ReqTimeout is the default timeout applied to RPC requests when no deadline
 	// is set on the context. Defaults to 60 seconds. Enforced minimum of 1 second.
 	ReqTimeout time.Duration
+	// RetryInterval is the initial delay between RPC retry attempts. The delay
+	// doubles on each subsequent retry up to a cap. Defaults to 5 seconds.
+	RetryInterval time.Duration
 	// Retries is the number of retries for RPC calls on transient errors
 	// (timeouts, connection resets, 500s). Non-retryable errors (401, 400, 403)
-	// fail immediately regardless of this setting. Defaults to 1.
+	// fail immediately regardless of this setting. Defaults to 5.
 	// The send timeout per attempt is controlled by ReqTimeout.
 	Retries int
 	// MaxConcurrentTrans limits how many file transfers may run in parallel.
@@ -577,7 +580,8 @@ func DeviceTDesktopWindows() DeviceConfig {
 var DefaultConfig = Config{
 	SleepThreshold:      10 * time.Second,
 	Timeout:             60 * time.Second,
-	ReqTimeout:          60 * time.Second,
+		ReqTimeout:          15 * time.Second,
+		RetryInterval:       5 * time.Second,
 	MaxConcurrentTrans:  1,
 	DispatchQueueSize:   defaultDispatchQueueSize,
 	MaxMessageCacheSize: 1000,

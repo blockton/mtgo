@@ -350,7 +350,7 @@ func (q *bindTempAuthKeyQuery) prepareForMessageID(msgID int64) (tg.TLObject, er
 // created more than 60 seconds ago, Bind returns ErrBindRequiresKeyRotation.
 // The caller must then drop both keys, recreate them, and retry.
 // See https://core.telegram.org/api/pfs for the full recovery procedure.
-func (m *TempKeyManager) Bind(ctx context.Context, sessionID int64, invoke func(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error)) error {
+func (m *TempKeyManager) Bind(ctx context.Context, sessionID int64, invoke func(ctx context.Context, query tg.TLObject) (tg.TLObject, error)) error {
 	m.bindMu.Lock()
 	defer m.bindMu.Unlock()
 	return m.bind(ctx, sessionID, invoke)
@@ -362,7 +362,7 @@ func (m *TempKeyManager) Rebind(
 	ctx context.Context,
 	sessionID int64,
 	observedEpoch uint64,
-	invoke func(context.Context, tg.TLObject, int, time.Duration) (tg.TLObject, error),
+	invoke func(context.Context, tg.TLObject) (tg.TLObject, error),
 ) (bool, error) {
 	m.bindMu.Lock()
 	defer m.bindMu.Unlock()
@@ -375,7 +375,7 @@ func (m *TempKeyManager) Rebind(
 	return true, m.bind(ctx, sessionID, invoke)
 }
 
-func (m *TempKeyManager) bind(ctx context.Context, sessionID int64, invoke func(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error)) error {
+func (m *TempKeyManager) bind(ctx context.Context, sessionID int64, invoke func(ctx context.Context, query tg.TLObject) (tg.TLObject, error)) error {
 	m.mu.Lock()
 	tempKey := bytes.Clone(m.tempKey)
 	permKey := bytes.Clone(m.permKey)
@@ -402,7 +402,7 @@ func (m *TempKeyManager) bind(ctx context.Context, sessionID int64, invoke func(
 		expiresAt: expiresAt,
 	}
 
-	result, err := invoke(ctx, bindReq, 3, 10*time.Second)
+	result, err := invoke(ctx, bindReq)
 	if err != nil {
 		m.mu.Lock()
 		m.bound = false

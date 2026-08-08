@@ -429,7 +429,7 @@ func TestDisconnectTwice(t *testing.T) {
 func TestInvokeNotConnected(t *testing.T) {
 	c, _ := NewClient(12345, "hash", nil)
 
-	_, err := c.Invoke(context.Background(), nil, 1, 5*time.Second)
+	_, err := c.Invoke(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("Invoke() = %v, want ErrNotConnected", err)
 	}
@@ -439,7 +439,7 @@ func TestAutoConnectFailureRestoresDisconnectedState(t *testing.T) {
 	c, _ := NewClient(12345, "hash", &Config{AutoConnect: true})
 
 	for attempt := range 2 {
-		_, err := c.Invoke(context.Background(), nil, 1, time.Second)
+		_, err := c.Invoke(context.Background(), nil)
 		if !errors.Is(err, ErrNoStorage) {
 			t.Fatalf("Invoke() attempt %d = %v, want ErrNoStorage", attempt+1, err)
 		}
@@ -453,7 +453,7 @@ func TestAutoConnectDisabledPreservesClosedError(t *testing.T) {
 	c, _ := NewClient(12345, "hash", nil)
 	c.state.SetClosed()
 
-	_, err := c.Invoke(context.Background(), nil, 1, time.Second)
+	_, err := c.Invoke(context.Background(), nil)
 	if !errors.Is(err, ErrClientClosed) {
 		t.Fatalf("Invoke() = %v, want ErrClientClosed", err)
 	}
@@ -466,7 +466,7 @@ func TestRetryRPCOnReconnectDoesNotWaitForInitialConnection(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := c.Invoke(ctx, nil, 1, time.Second)
+		_, err := c.Invoke(ctx, nil)
 		done <- err
 	}()
 
@@ -495,7 +495,7 @@ func TestNewClientAppliesRetriesConfig(t *testing.T) {
 func TestInvokeRawNotConnected(t *testing.T) {
 	c, _ := NewClient(12345, "hash", nil)
 
-	_, err := c.InvokeRaw(context.Background(), nil, 1, 5*time.Second)
+	_, err := c.InvokeRaw(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("InvokeRaw() = %v, want ErrNotConnected", err)
 	}
@@ -1253,12 +1253,12 @@ func TestFullLifecycle(t *testing.T) {
 func TestAllMethodsGuardNotConnected(t *testing.T) {
 	c, _ := NewClient(1, "h", nil)
 
-	_, err := c.Invoke(context.Background(), nil, 1, 5*time.Second)
+	_, err := c.Invoke(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("Invoke: %v", err)
 	}
 
-	_, err = c.InvokeRaw(context.Background(), nil, 1, 5*time.Second)
+	_, err = c.InvokeRaw(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("InvokeRaw: %v", err)
 	}

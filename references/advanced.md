@@ -190,13 +190,13 @@ Auto-detects format (Telethon, Pyrogram, GramJS, mtcute, mtgo).
 
 ### InvokeRaw — skip error wrapping
 
-`client.InvokeRaw(ctx, query, retries, timeout)` returns the decoded TL response with original RPC error handling. Use when you need to inspect original RPC errors directly.
+`client.InvokeRaw(ctx, query)` returns the decoded TL response with original RPC error handling. Use when you need to inspect original RPC errors directly.
 
 ```go
 raw, err := client.InvokeRaw(ctx, &tg.MessagesGetHistoryRequest{
     Peer:  &tg.InputPeerChannel{ChannelID: channelID, AccessHash: hash},
     Limit: 100,
-}, 3, 10*time.Second)
+})
 ```
 
 ### InvokeWithRawResult — raw MTProto result payload

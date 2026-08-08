@@ -562,7 +562,10 @@ func TestBindTempAuthKeyInnerMessageIDMatchesOuterOnEveryAttempt(t *testing.T) {
 
 	bindDone := make(chan error, 1)
 	go func() {
-		bindDone <- pfs.Bind(context.Background(), s.SessionID(), s.Invoke)
+		bindDone <- pfs.Bind(context.Background(), s.SessionID(),
+			func(ctx context.Context, query tg.TLObject) (tg.TLObject, error) {
+				return s.Invoke(ctx, query, defaultInvokeRetries, invokeTimeout(ctx))
+			})
 	}()
 	nextAttempt := func() decodedBindEnvelope {
 		t.Helper()
@@ -623,9 +626,10 @@ func TestBindTempAuthKeyRequiresBoolTrue(t *testing.T) {
 			manager.bindExpiresAt = int32(time.Now().Add(time.Hour).Unix())
 			manager.mu.Unlock()
 
-			err := manager.Bind(context.Background(), 123, func(context.Context, tg.TLObject, int, time.Duration) (tg.TLObject, error) {
-				return tt.result, nil
-			})
+			err := manager.Bind(context.Background(), 123,
+				func(ctx context.Context, query tg.TLObject) (tg.TLObject, error) {
+					return tt.result, nil
+				})
 			if err == nil {
 				t.Fatal("Bind() succeeded without BoolTrue")
 			}

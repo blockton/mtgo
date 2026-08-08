@@ -44,29 +44,14 @@ type clientInvoker struct {
 
 func (ci *clientInvoker) RPCInvoke(ctx context.Context, input tg.TLObject, decode func(*tg.Reader) (tg.TLObject, error)) (tg.TLObject, error) {
 	cfg := ci.client.config()
-	deadline, ok := ctx.Deadline()
-	timeout := time.Duration(0)
-	if ok {
-		timeout = max(time.Until(deadline), 0)
-	} else {
-		timeout = cfg.ReqTimeout
-		if timeout <= 0 {
-			timeout = 60 * time.Second
-		}
-	}
-	if timeout < time.Second {
-		timeout = time.Second
-	}
-
-	retries := max(cfg.Retries, 1)
 	query, initializesAPI := prepareAPIQuery(cfg, ci.client.apiInit.Load(), input)
 
-	ci.client.Log.Debugf("RPC invoke method=%T timeout=%s", input, timeout)
+	ci.client.Log.Debugf("RPC invoke method=%T", input)
 
 	var result tg.TLObject
 	err := retryTransferFloodWait(ctx, func() error {
 		var invokeErr error
-		result, invokeErr = ci.client.Invoke(ctx, query, retries, timeout)
+		result, invokeErr = ci.client.Invoke(ctx, query)
 		if invokeErr != nil {
 			return invokeErr
 		}
@@ -102,7 +87,7 @@ func (ci *clientInvoker) RPCInvoke(ctx context.Context, input tg.TLObject, decod
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
-			result, err = ci.client.Invoke(ctx, query, retries, timeout)
+			result, err = ci.client.Invoke(ctx, query)
 			if err != nil {
 				return nil, err
 			}

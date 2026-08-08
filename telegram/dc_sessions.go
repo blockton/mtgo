@@ -808,19 +808,14 @@ func (d *dcSessionInvoker) RPCInvoke(ctx context.Context, input tg.TLObject, dec
 		defer func() { d.entry.endRequest(started, err, d.client.config().EndpointCoolDown) }()
 	}
 
-	deadline, ok := ctx.Deadline()
-	timeout := time.Duration(0)
-	if ok {
-		timeout = max(time.Until(deadline), 0)
-	} else {
-		timeout = 60 * time.Second
-	}
+	timeout := d.client.invokeTimeout(ctx)
+	retries := d.client.invokeRetries()
 
 	query, initializesAPI := prepareAPIQuery(d.client.config(), d.apiInit.Load(), input)
 
 	err = retryTransferFloodWait(ctx, func() error {
 		var invokeErr error
-		result, invokeErr = d.sess.Invoke(ctx, query, 2, timeout)
+		result, invokeErr = d.sess.Invoke(ctx, query, retries, timeout)
 		if invokeErr != nil {
 			return invokeErr
 		}
@@ -870,7 +865,7 @@ func (d *dcSessionInvoker) RPCInvokeRaw(ctx context.Context, input tg.TLObject) 
 
 	err = retryTransferFloodWait(ctx, func() error {
 		var invokeErr error
-		data, invokeErr = d.sess.InvokeRaw(ctx, query, 2, 60*time.Second)
+		data, invokeErr = d.sess.InvokeRaw(ctx, query, d.client.invokeRetries(), d.client.invokeTimeout(ctx))
 		return invokeErr
 	})
 	if err != nil {

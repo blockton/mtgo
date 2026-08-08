@@ -10,12 +10,17 @@ type Invoker interface {
 	RPCInvokeRaw(ctx context.Context, input TLObject) ([]byte, error)
 }
 
+// InvokerFunc is a function type that implements Invoker, useful for
+// inline invoker implementations in middleware and tests.
 type InvokerFunc func(ctx context.Context, input TLObject, decode func(*Reader) (TLObject, error)) (TLObject, error)
 
+// RPCInvoke implements Invoker.
 func (f InvokerFunc) RPCInvoke(ctx context.Context, input TLObject, decode func(*Reader) (TLObject, error)) (TLObject, error) {
 	return f(ctx, input, decode)
 }
 
+// RPCInvokeRaw implements Invoker. Returns an error since InvokerFunc
+// does not support raw results.
 func (f InvokerFunc) RPCInvokeRaw(ctx context.Context, input TLObject) ([]byte, error) {
 	return nil, fmt.Errorf("tg: InvokerFunc does not implement RPCInvokeRaw")
 }
@@ -32,9 +37,4 @@ func (c *RPCClient) Invoke(ctx context.Context, input TLObject, decode func(*Rea
 // rpc_result result:Object payload bytes without gzip unpacking or TL decoding.
 func (c *RPCClient) InvokeWithRawResult(ctx context.Context, input TLObject) ([]byte, error) {
 	return c.rpc.RPCInvokeRaw(ctx, input)
-}
-
-// InvokeWithBytes is deprecated. Use [RPCClient.InvokeWithRawResult].
-func (c *RPCClient) InvokeWithBytes(ctx context.Context, input TLObject) ([]byte, error) {
-	return c.InvokeWithRawResult(ctx, input)
 }
