@@ -290,10 +290,21 @@ func (b *OutboundBatcher) Close() error {
 	return nil
 }
 
+// encodeBufPool recycles bytes.Buffer allocations across TL-object
+// serialization calls in the hot path (InvokeRaw, OutboundBatcher.Submit).
+var encodeBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
 func encodeBuf(obj tg.TLObject) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := obj.Encode(&buf); err != nil {
+	buf := encodeBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer encodeBufPool.Put(buf)
+
+	if err := obj.Encode(buf); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	return out, nil
 }

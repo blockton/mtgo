@@ -635,7 +635,10 @@ func (s *Session) recoverPFSBinding(ctx context.Context, pfs *TempKeyManager, ob
 		}
 	}()
 
-	_, retErr = pfs.Rebind(recoveryCtx, s.sessionID, observedEpoch, s.Invoke)
+	_, retErr = pfs.Rebind(recoveryCtx, s.sessionID, observedEpoch,
+		func(ctx context.Context, query tg.TLObject) (tg.TLObject, error) {
+			return s.Invoke(ctx, query, defaultInvokeRetries, invokeTimeout(ctx))
+		})
 	if retErr != nil {
 		return retErr
 	}
@@ -740,6 +743,22 @@ func (s *Session) sessionIDBytes() []byte {
 	return s.sidBytes[:]
 }
 
+// packAndWrite registers a pending handle for msgID, stores the encrypted
+// payload for msg_resend_req re-transmission, and writes it to the transport.
+// On write failure the handle is cancelled. Shared by [Send] and [SendRaw].
+func (s *Session) packAndWrite(ctx context.Context, msgID int64, encrypted []byte, isRaw bool, timeout time.Duration) (*CallHandle, error) {
+	handle, err := s.pending.Register(msgID, isRaw)
+	if err != nil {
+		return nil, err
+	}
+	handle.StorePayload(encrypted)
+	if err := s.writeEncrypted(ctx, encrypted, timeout); err != nil {
+		s.pending.Cancel(msgID)
+		return nil, deliveryFailure(handle, err)
+	}
+	return handle, nil
+}
+
 // Send encrypts and sends a TLObject as a single MTProto message, then waits
 // for the server's response. The msgID and seqNo identify the message.
 // ctx is used for cancellation: when cancelled after the message has been sent,
@@ -753,6 +772,7 @@ func (s *Session) Send(ctx context.Context, msgID int64, seqNo uint32, body tg.T
 	authKey := s.authKey
 	authKeyID := s.authKeyID
 	transport := s.transport
+	b := s.outboundBatcher
 	s.mu.RUnlock()
 	if len(authKey) == 0 {
 		return nil, ErrAuthKeyNotSet
@@ -764,11 +784,6 @@ func (s *Session) Send(ctx context.Context, msgID int64, seqNo uint32, body tg.T
 	// When the outbound batcher is enabled, delegate low-priority bulk work to
 	// it. High-priority interactive RPCs write directly to avoid the coalescing
 	// window.
-	// Read under s.mu.RLock to avoid racing with EnableOutboundBatching/
-	// CloseOutboundBatching which write s.outboundBatcher under s.mu (#6).
-	s.mu.RLock()
-	b := s.outboundBatcher
-	s.mu.RUnlock()
 	if b != nil && RoutePriority(body) == PriorityLow {
 		handle, err := b.Submit(ctx, msgID, seqNo, body, PriorityLow, timeout)
 		if err != nil {
@@ -793,17 +808,9 @@ func (s *Session) Send(ctx context.Context, msgID int64, seqNo uint32, body tg.T
 		return nil, fmt.Errorf("session: pack message: %w", err)
 	}
 
-	handle, regErr := s.pending.Register(msgID, false)
-	if regErr != nil {
-		return nil, fmt.Errorf("session: send: %w", regErr)
-	}
-
-	// Store encrypted payload for msg_resend_req re-transmission.
-	handle.StorePayload(encrypted)
-
-	if err := s.writeEncrypted(ctx, encrypted, timeout); err != nil {
-		s.pending.Cancel(msgID)
-		return nil, fmt.Errorf("session: send: %w", deliveryFailure(handle, err))
+	handle, err := s.packAndWrite(ctx, msgID, encrypted, false, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("session: send: %w", err)
 	}
 
 	return s.waitResponse(ctx, handle, msgID, timeout)
@@ -828,6 +835,29 @@ func (s *Session) waitResponse(ctx context.Context, handle *CallHandle, msgID in
 		<-handle.Done()
 		obj, _, err := handle.Result()
 		return obj, deliveryFailure(handle, err)
+	case <-respTimer.C:
+		s.pending.Cancel(msgID)
+		return nil, deliveryFailure(handle, ErrSendTimeout)
+	}
+}
+
+// waitResponseRaw is the raw-result variant of [waitResponse]. It returns the
+// raw rpc_result payload bytes without TL decoding.
+func (s *Session) waitResponseRaw(ctx context.Context, handle *CallHandle, msgID int64, timeout time.Duration) ([]byte, error) {
+	respTimer := time.NewTimer(timeout)
+	defer respTimer.Stop()
+	select {
+	case <-handle.Done():
+		_, raw, err := handle.Result()
+		return raw, deliveryFailure(handle, err)
+	case <-ctx.Done():
+		s.pending.Cancel(msgID)
+		return nil, ctx.Err()
+	case <-s.done:
+		s.pending.Reject(msgID, ErrSessionClosed)
+		<-handle.Done()
+		_, raw, err := handle.Result()
+		return raw, deliveryFailure(handle, err)
 	case <-respTimer.C:
 		s.pending.Cancel(msgID)
 		return nil, deliveryFailure(handle, ErrSendTimeout)
@@ -1012,49 +1042,34 @@ func (s *Session) SendRaw(ctx context.Context, msgID int64, seqNo uint32, bodyBy
 		return nil, fmt.Errorf("session: send raw: %w", err)
 	}
 
-	handle, regErr := s.pending.Register(msgID, true)
-	if regErr != nil {
-		return nil, fmt.Errorf("session: send raw: %w", regErr)
-	}
-	handle.StorePayload(encrypted)
-
-	if err := s.writeEncrypted(ctx, encrypted, timeout); err != nil {
-		s.pending.Cancel(msgID)
-		return nil, fmt.Errorf("session: send raw: %w", deliveryFailure(handle, err))
+	handle, err := s.packAndWrite(ctx, msgID, encrypted, true, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("session: send raw: %w", err)
 	}
 
-	respTimer := time.NewTimer(timeout)
-	defer respTimer.Stop()
-	select {
-	case <-handle.Done():
-		_, raw, err := handle.Result()
-		return raw, deliveryFailure(handle, err)
-	case <-ctx.Done():
-		s.pending.Cancel(msgID)
-		return nil, ctx.Err()
-	case <-s.done:
-		s.pending.Reject(msgID, ErrSessionClosed)
-		<-handle.Done()
-		_, raw, err := handle.Result()
-		return raw, deliveryFailure(handle, err)
-	case <-respTimer.C:
-		s.pending.Cancel(msgID)
-		return nil, deliveryFailure(handle, ErrSendTimeout)
-	}
+	return s.waitResponseRaw(ctx, handle, msgID, timeout)
 }
 
 // InvokeRaw sends a TLObject query and returns the matching rpc_result's raw
 // result:Object payload bytes without gzip unpacking or TL decoding. It retries
 // the request up to retries times with the given per-attempt timeout.
 func (s *Session) InvokeRaw(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := query.Encode(&buf); err != nil {
+	buf := encodeBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	if err := query.Encode(buf); err != nil {
+		encodeBufPool.Put(buf)
 		return nil, fmt.Errorf("encode query: %w", err)
 	}
-	bodyBytes := buf.Bytes()
+	bodyBytes := make([]byte, buf.Len())
+	copy(bodyBytes, buf.Bytes())
+	encodeBufPool.Put(buf)
 
 	var lastErr error
+	var backoff time.Duration
 	for i := 0; i < retries; i++ {
+		if i > 0 {
+			time.Sleep(backoff)
+		}
 		msgID := s.msgFactory.AllocateMsgID()
 		seqNo := s.msgFactory.AllocateSeqNo(true)
 
@@ -1067,6 +1082,14 @@ func (s *Session) InvokeRaw(ctx context.Context, query tg.TLObject, retries int,
 			var deliveryErr *DeliveryError
 			if errors.As(err, &deliveryErr) {
 				return nil, lastErr
+			}
+			if backoff == 0 {
+				backoff = 100 * time.Millisecond
+			} else {
+				backoff = backoff * 2
+				if backoff > 2*time.Second {
+					backoff = 2 * time.Second
+				}
 			}
 			continue
 		}
@@ -1374,6 +1397,22 @@ func (s *Session) DropRPC(ctx context.Context, msgID int64) error {
 	return nil
 }
 
+// defaultInvokeRetries is the default retry count used when the session is
+// called without an explicit retry parameter (e.g., from the PFS rebind path).
+const defaultInvokeRetries = 3
+
+// invokeTimeout derives a per-attempt timeout from the context deadline.
+// Falls back to 60s when the context has no deadline.
+func invokeTimeout(ctx context.Context) time.Duration {
+	timeout := 60 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return timeout
+}
+
 // maxG12Retries bounds the number of G12 error-recovery retries (for
 // CONNECTION_NOT_INITED, PERSISTENT_TIMESTAMP_OUTDATED, AUTH_KEY_PERM_EMPTY)
 // before surfacing the error to the caller.
@@ -1438,7 +1477,7 @@ func (s *Session) runInitWithCtx(pingCtx, groupCtx context.Context) error {
 
 	initPingCtx, initPingCancel := context.WithTimeout(pingCtx, 60*time.Second)
 	stopGroupCancel := context.AfterFunc(groupCtx, initPingCancel)
-	_, err := s.Invoke(initPingCtx, &tg.PingRequest{PingID: time.Now().UnixNano()}, 3, timeoutFromContext(pingCtx))
+	_, err := s.Invoke(initPingCtx, &tg.PingRequest{PingID: time.Now().UnixNano()}, 3, invokeTimeout(pingCtx))
 	stopGroupCancel()
 	initPingCancel()
 	if err != nil {
@@ -1606,15 +1645,6 @@ func (s *Session) Stop() {
 	}
 }
 
-func timeoutFromContext(ctx context.Context) time.Duration {
-	if deadline, ok := ctx.Deadline(); ok {
-		timeout := time.Until(deadline)
-		if timeout > 0 {
-			return timeout
-		}
-	}
-	return 60 * time.Second
-}
 
 func (s *Session) ensureFreshSalt(ctx context.Context) int64 {
 	if !s.saltMgr.IsExpired() {

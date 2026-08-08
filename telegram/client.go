@@ -408,12 +408,15 @@ func (c *Config) mergeConfig(src *Config) {
 	if src.ReqTimeout != 0 {
 		c.ReqTimeout = src.ReqTimeout
 	}
-	if src.Retries != 0 {
-		c.Retries = src.Retries
-	}
-	if src.MaxConcurrentTrans != 0 {
-		c.MaxConcurrentTrans = src.MaxConcurrentTrans
-	}
+		if src.Retries != 0 {
+			c.Retries = src.Retries
+		}
+		if src.RetryInterval != 0 {
+			c.RetryInterval = src.RetryInterval
+		}
+		if src.MaxConcurrentTrans != 0 {
+			c.MaxConcurrentTrans = src.MaxConcurrentTrans
+		}
 	if src.DispatchWorkers != 0 {
 		c.DispatchWorkers = src.DispatchWorkers
 	}
@@ -915,7 +918,6 @@ func (c *Client) SetDispatcher(d Dispatcher) {
 	c.dispatcher = d
 	c.mu.Unlock()
 }
-
 func (c *Client) setTestStorage(s storage.Storage) {
 	c.mu.Lock()
 	c.testStorage = s
@@ -2121,8 +2123,8 @@ func (c *Client) bindSessionPFS(ctx context.Context, sess *session.Session) erro
 	if pfs == nil {
 		return nil
 	}
-	err := pfs.Bind(ctx, sess.SessionID(), func(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error) {
-		return sess.Invoke(ctx, query, retries, timeout)
+	err := pfs.Bind(ctx, sess.SessionID(), func(ctx context.Context, query tg.TLObject) (tg.TLObject, error) {
+		return sess.Invoke(ctx, query, c.invokeRetries(), c.invokeTimeout(ctx))
 	})
 	if err == nil {
 		return nil
@@ -2801,51 +2803,87 @@ func (c *Client) Health() HealthStatus {
 	return c.state.Health()
 }
 
-func (c *Client) handleMigrationError(ctx context.Context, rpcErr *tgerr.Error, query tg.TLObject) (tg.TLObject, error) {
-	targetDC := rpcErr.Argument
-	if targetDC <= 0 {
-		return nil, &MigrationError{TargetDC: targetDC, Err: ErrMigrationUnknown}
-	}
+// migrationAction classifies the type of DC migration requested by the server
+// in a 303 SEE_OTHER error.
+type migrationAction int
 
+const (
+	migrationPrimarySwitch migrationAction = iota
+	migrationExportImport
+)
+
+// dispatchMigration validates a 303 SEE_OTHER error and classifies the
+// migration type. It returns the target DC, the required action, or an error
+// if the migration request is invalid or unsupported.
+func (c *Client) dispatchMigration(rpcErr *tgerr.Error) (targetDC int, action migrationAction, err error) {
+	targetDC = rpcErr.Argument
+	if targetDC <= 0 {
+		return 0, 0, &MigrationError{TargetDC: targetDC, Err: ErrMigrationUnknown}
+	}
 	if rpcErr.Code != 303 {
-		return nil, rpcErr
+		return 0, 0, rpcErr
 	}
 
 	c.Log.Infof("DC migration required: %s -> DC %d", rpcErr.Type, targetDC)
 
-	c.mu.Lock()
-	st := c.storage
-	c.mu.Unlock()
-	if st == nil {
-		return nil, &MigrationError{TargetDC: targetDC, Err: ErrNotConnected}
-	}
-
 	switch rpcErr.Type {
 	case "PHONE_MIGRATE", "NETWORK_MIGRATE", "USER_MIGRATE":
-		return c.migrateAndRetry(ctx, targetDC, query, st)
+		return targetDC, migrationPrimarySwitch, nil
 	case "FILE_MIGRATE", "STATS_MIGRATE":
-		return c.migrateExportImport(ctx, targetDC, query, st)
+		return targetDC, migrationExportImport, nil
 	default:
-		return nil, &MigrationError{TargetDC: targetDC, Err: fmt.Errorf("unsupported migration type: %s", rpcErr.Type)}
+		return 0, 0, &MigrationError{TargetDC: targetDC, Err: fmt.Errorf("unsupported migration type: %s", rpcErr.Type)}
 	}
 }
 
-func (c *Client) migrateAndRetry(ctx context.Context, targetDC int, query tg.TLObject, st storage.Storage) (tg.TLObject, error) {
+// doPrimarySwitch serializes primary-DC migrations through the migration
+// coordinator and calls switchPrimaryDC to move the main session to the
+// target data center. It is safe for use by both decoded and raw migration
+// paths.
+func (c *Client) doPrimarySwitch(ctx context.Context, targetDC int, query tg.TLObject, st storage.Storage) error {
 	if query == nil {
-		return nil, &MigrationError{TargetDC: targetDC, Err: errors.New("nil migration query")}
+		return &MigrationError{TargetDC: targetDC, Err: errors.New("nil migration query")}
 	}
-
 	if err := c.migration.Do(ctx, targetDC, func(ctx context.Context) error {
 		if c.homeDC() == targetDC && c.IsConnected() {
 			return nil
 		}
 		return c.switchPrimaryDC(ctx, targetDC, st, nil)
 	}); err != nil {
-		return nil, &MigrationError{TargetDC: targetDC, Err: err}
+		return &MigrationError{TargetDC: targetDC, Err: err}
+	}
+	return nil
+}
+
+func (c *Client) handleMigrationError(ctx context.Context, rpcErr *tgerr.Error, query tg.TLObject) (tg.TLObject, error) {
+	targetDC, action, err := c.dispatchMigration(rpcErr)
+	if err != nil {
+		return nil, err
 	}
 
-	retries := max(c.config().Retries, 1)
-	result, err := c.Invoke(ctx, query, retries, 30*time.Second)
+	c.mu.RLock()
+	st := c.storage
+	c.mu.RUnlock()
+	if st == nil {
+		return nil, &MigrationError{TargetDC: targetDC, Err: ErrNotConnected}
+	}
+
+	switch action {
+	case migrationPrimarySwitch:
+		return c.migrateAndRetry(ctx, targetDC, query, st)
+	case migrationExportImport:
+		return c.migrateExportImport(ctx, targetDC, query, st)
+	default:
+		panic("unreachable")
+	}
+}
+
+func (c *Client) migrateAndRetry(ctx context.Context, targetDC int, query tg.TLObject, st storage.Storage) (tg.TLObject, error) {
+	if err := c.doPrimarySwitch(ctx, targetDC, query, st); err != nil {
+		return nil, err
+	}
+
+	result, err := c.Invoke(ctx, query)
 	if err != nil {
 		return nil, &MigrationError{TargetDC: targetDC, Err: err}
 	}
@@ -2863,20 +2901,15 @@ func (c *Client) migrateExportImport(ctx context.Context, targetDC int, query tg
 	}
 
 	c.Log.Infof("DC migration to DC %d complete via dcRPC", targetDC)
-
 	return rpc.Invoke(ctx, query, nil)
 }
 
 func (c *Client) handleRawMigrationError(ctx context.Context, rpcErr *tgerr.Error, query tg.TLObject) ([]byte, error) {
-	targetDC := rpcErr.Argument
-	if targetDC <= 0 {
-		return nil, &MigrationError{TargetDC: targetDC, Err: ErrMigrationUnknown}
-	}
-	if rpcErr.Code != 303 {
-		return nil, rpcErr
+	targetDC, action, err := c.dispatchMigration(rpcErr)
+	if err != nil {
+		return nil, err
 	}
 
-	c.Log.Infof("DC migration required: %s -> DC %d", rpcErr.Type, targetDC)
 	c.mu.RLock()
 	st := c.storage
 	c.mu.RUnlock()
@@ -2884,27 +2917,19 @@ func (c *Client) handleRawMigrationError(ctx context.Context, rpcErr *tgerr.Erro
 		return nil, &MigrationError{TargetDC: targetDC, Err: ErrNotConnected}
 	}
 
-	switch rpcErr.Type {
-	case "PHONE_MIGRATE", "NETWORK_MIGRATE", "USER_MIGRATE":
+	switch action {
+	case migrationPrimarySwitch:
 		return c.migrateAndRetryRaw(ctx, targetDC, query, st)
-	case "FILE_MIGRATE", "STATS_MIGRATE":
+	case migrationExportImport:
 		return c.migrateExportImportRaw(ctx, targetDC, query)
 	default:
-		return nil, &MigrationError{TargetDC: targetDC, Err: fmt.Errorf("unsupported migration type: %s", rpcErr.Type)}
+		panic("unreachable")
 	}
 }
 
 func (c *Client) migrateAndRetryRaw(ctx context.Context, targetDC int, query tg.TLObject, st storage.Storage) ([]byte, error) {
-	if query == nil {
-		return nil, &MigrationError{TargetDC: targetDC, Err: errors.New("nil migration query")}
-	}
-	if err := c.migration.Do(ctx, targetDC, func(ctx context.Context) error {
-		if c.homeDC() == targetDC && c.IsConnected() {
-			return nil
-		}
-		return c.switchPrimaryDC(ctx, targetDC, st, nil)
-	}); err != nil {
-		return nil, &MigrationError{TargetDC: targetDC, Err: err}
+	if err := c.doPrimarySwitch(ctx, targetDC, query, st); err != nil {
+		return nil, err
 	}
 
 	data, err := c.InvokeWithRawResult(ctx, query)
@@ -2934,32 +2959,76 @@ func (c *Client) admitRPC(ctx context.Context, query tg.TLObject) (func(), error
 	return oc.Admit(ctx, int(session.RoutePriority(query)))
 }
 
-// Invoke sends a TLObject query through the primary session. The first API query
-// on a connection is wrapped in InvokeWithLayer+InitConnection automatically.
-//
-// Returns ErrNotConnected if the client is not connected.
-func (c *Client) Invoke(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error) {
+// invokeTimeout derives the per-attempt RPC timeout from config and context.
+// If the context has a deadline shorter than ReqTimeout, the shorter deadline
+// is used. Falls back to 60s when ReqTimeout is zero.
+func (c *Client) invokeTimeout(ctx context.Context) time.Duration {
+	timeout := c.config().ReqTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	if timeout < time.Second {
+		timeout = time.Second
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return timeout
+}
+
+// invokeRetries derives the retry count from config. Defaults to 1 when config
+// Retries is zero.
+func (c *Client) invokeRetries() int {
+	return max(c.config().Retries, 1)
+}
+
+// rpcPrep holds the result of [Client.prepareRPC]: the wrapped query, the
+// API-init flag, and an optional overload-admission release function.
+type rpcPrep struct {
+	query       tg.TLObject
+	initializes bool
+	release     func()
+}
+
+// prepareRPC performs the shared preamble for all RPC invoke paths: connection
+// check with reconnect wait, overload admission, and API initialization
+// wrapping. The caller MUST call rpcPrep.release() after the RPC completes if
+// it is non-nil.
+func (c *Client) prepareRPC(ctx context.Context, input tg.TLObject) (*rpcPrep, error) {
 	if err := c.ensureConnectedContext(ctx); err != nil {
 		if !c.retryRPCOnReconnect(ctx) || c.state.State() != ConnStateReconnecting {
 			return nil, err
 		}
-		// Wait for reconnection, then proceed.
 		if waitErr := c.waitForConnect(ctx); waitErr != nil {
 			return nil, waitErr
 		}
 	}
 
-	// Overload control: gate admission by priority (FR-018). When disabled
-	// (MaxInFlightRPCs == 0), Admit is a no-op (backward compat).
-	release, err := c.admitRPC(ctx, query)
+	release, err := c.admitRPC(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	if release != nil {
-		defer release()
-	}
 
-	query, initializesAPI := prepareAPIQuery(c.config(), c.apiInit.Load(), query)
+	query, initializes := prepareAPIQuery(c.config(), c.apiInit.Load(), input)
+	return &rpcPrep{query: query, initializes: initializes, release: release}, nil
+}
+
+// Invoke sends a TLObject query through the primary session. The first API query
+// on a connection is wrapped in InvokeWithLayer+InitConnection automatically.
+// The context's deadline controls the overall timeout; per-attempt timeout and
+// retry count are derived from Config.ReqTimeout and Config.Retries.
+//
+// Returns ErrNotConnected if the client is not connected.
+func (c *Client) Invoke(ctx context.Context, query tg.TLObject) (tg.TLObject, error) {
+	prep, err := c.prepareRPC(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if prep.release != nil {
+		defer prep.release()
+	}
 
 	var result tg.TLObject
 	err = c.retrySessionErr(ctx, func(sess *session.Session) error {
@@ -2967,7 +3036,7 @@ func (c *Client) Invoke(ctx context.Context, query tg.TLObject, retries int, tim
 			return ErrNotConnected
 		}
 		var invokeErr error
-		result, invokeErr = sess.Invoke(ctx, query, retries, timeout)
+		result, invokeErr = sess.Invoke(ctx, prep.query, c.invokeRetries(), c.invokeTimeout(ctx))
 		if invokeErr == nil {
 			if rpcErr, ok := result.(*tg.RPCError); ok {
 				parsed := tgerr.New(int(rpcErr.ErrorCode), rpcErr.ErrorMessage)
@@ -2977,50 +3046,49 @@ func (c *Client) Invoke(ctx context.Context, query tg.TLObject, retries int, tim
 			}
 		}
 		return invokeErr
-	}, query)
+	}, prep.query)
 	if err != nil {
 		var rpcErr *tgerr.Error
 		if errors.As(err, &rpcErr) && rpcErr.Code == 303 {
-			return c.handleMigrationError(ctx, rpcErr, query)
+			return c.handleMigrationError(ctx, rpcErr, prep.query)
 		}
 		return nil, err
 	}
-	if initializesAPI {
+	if prep.initializes {
 		c.apiInit.Store(true)
 	}
 	return result, nil
 }
 
-// InvokeRaw sends a TLObject query through the primary session, returning the raw response
-// without wrapping errors. This is useful when the caller needs to inspect the original error.
-// The provided context is used for cancellation.
+// InvokeRaw sends a TLObject query through the primary session, returning the
+// decoded TL response without wrapping RPC errors. This is useful when the
+// caller needs to inspect the original error.
+// The context's deadline controls the overall timeout; per-attempt timeout and
+// retry count are derived from Config.ReqTimeout and Config.Retries.
 //
 // Returns ErrNotConnected if the client is not connected.
-func (c *Client) InvokeRaw(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error) {
-	if err := c.ensureConnectedContext(ctx); err != nil {
-		if !c.retryRPCOnReconnect(ctx) || c.state.State() != ConnStateReconnecting {
-			return nil, err
-		}
-		if waitErr := c.waitForConnect(ctx); waitErr != nil {
-			return nil, waitErr
-		}
+func (c *Client) InvokeRaw(ctx context.Context, query tg.TLObject) (tg.TLObject, error) {
+	prep, err := c.prepareRPC(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if prep.release != nil {
+		defer prep.release()
 	}
 
-	query, initializesAPI := prepareAPIQuery(c.config(), c.apiInit.Load(), query)
-
 	var result tg.TLObject
-	err := c.retrySessionErr(ctx, func(sess *session.Session) error {
+	err = c.retrySessionErr(ctx, func(sess *session.Session) error {
 		if sess == nil {
 			return ErrNotConnected
 		}
 		var invokeErr error
-		result, invokeErr = sess.Invoke(ctx, query, retries, timeout)
+		result, invokeErr = sess.Invoke(ctx, prep.query, c.invokeRetries(), c.invokeTimeout(ctx))
 		return invokeErr
-	}, query)
+	}, prep.query)
 	if err != nil {
 		return nil, err
 	}
-	if initializesAPI {
+	if prep.initializes {
 		c.apiInit.Store(true)
 	}
 	return result, nil
@@ -3031,38 +3099,16 @@ func (c *Client) InvokeRaw(ctx context.Context, query tg.TLObject, retries int, 
 // into a Go struct and are not gzip-unpacked; if the server returned
 // gzip_packed, the bytes start with the gzip_packed constructor.
 func (c *Client) InvokeWithRawResult(ctx context.Context, query tg.TLObject) ([]byte, error) {
-	if err := c.ensureConnectedContext(ctx); err != nil {
-		if !c.retryRPCOnReconnect(ctx) || c.state.State() != ConnStateReconnecting {
-			return nil, err
-		}
-		if waitErr := c.waitForConnect(ctx); waitErr != nil {
-			return nil, waitErr
-		}
-	}
-
-	release, err := c.admitRPC(ctx, query)
+	prep, err := c.prepareRPC(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	if release != nil {
-		defer release()
+	if prep.release != nil {
+		defer prep.release()
 	}
 
-	timeout := c.config().ReqTimeout
-	if deadline, ok := ctx.Deadline(); ok {
-		if d := time.Until(deadline); d < timeout {
-			timeout = d
-		}
-	}
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
-	if timeout < time.Second {
-		timeout = time.Second
-	}
-	retries := max(c.config().Retries, 1)
-
-	query, initializesAPI := prepareAPIQuery(c.config(), c.apiInit.Load(), query)
+	timeout := c.invokeTimeout(ctx)
+	retries := c.invokeRetries()
 
 	var result []byte
 	err = c.retrySessionErr(ctx, func(sess *session.Session) error {
@@ -3070,13 +3116,13 @@ func (c *Client) InvokeWithRawResult(ctx context.Context, query tg.TLObject) ([]
 			return ErrNotConnected
 		}
 		var invokeErr error
-		result, invokeErr = sess.InvokeRaw(ctx, query, retries, timeout)
+		result, invokeErr = sess.InvokeRaw(ctx, prep.query, retries, timeout)
 		return invokeErr
-	}, query)
+	}, prep.query)
 	if err != nil {
 		return nil, err
 	}
-	if initializesAPI {
+	if prep.initializes {
 		c.apiInit.Store(true)
 	}
 	return result, nil
