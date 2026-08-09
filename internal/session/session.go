@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -193,7 +194,7 @@ type Session struct {
 	// adaptive read-timeout detection of dead connections for active
 	// sessions without waiting for the full ping cycle.
 	lastActivityTime atomic.Int64
-	onRTT       func(time.Duration, time.Duration)
+	onRTT            func(time.Duration, time.Duration)
 	// ackCh is a channel consumed by ackLoop to batch and send message
 	// acknowledgments.
 	ackCh chan int64
@@ -232,8 +233,13 @@ type Session struct {
 	consecWriteFailures   atomic.Int32
 	writeBreakerThreshold atomic.Int32
 	writeBreakerOpen      atomic.Bool
-	stopping              atomic.Bool
-	shutdownCause         atomic.Pointer[sessionShutdownCause]
+	// connectedAt is set when the session reaches StateActive and cleared on
+	// reset. It enables diagnostic error messages that report how long the
+	// connection was alive before it died.
+	connectedAt atomic.Pointer[time.Time]
+
+	stopping      atomic.Bool
+	shutdownCause atomic.Pointer[sessionShutdownCause]
 
 	// Production-hardening fields (end of struct to keep hot-path fields in
 	// the first 6 cache lines — only accessed when features are enabled).
@@ -405,8 +411,12 @@ func (s *Session) recordShutdownCause(err error, source string) {
 		return
 	}
 	if s.log != nil {
-		s.log.Errorf("session: shutdown cause: source=%s dc=%d session_id=%d: %v",
-			source, s.dc.ID, s.sessionID, err)
+		age := ""
+		if at := s.connectedAt.Load(); at != nil {
+			age = " age=" + time.Since(*at).Truncate(time.Second).String()
+		}
+		s.log.Errorf("session: shutdown cause: source=%s dc=%d session_id=%d%s: %v",
+			source, s.dc.ID, s.sessionID, age, err)
 	}
 }
 
@@ -1472,6 +1482,7 @@ func (s *Session) runInitWithCtx(pingCtx, groupCtx context.Context) error {
 	s.chains = make(map[int64]int64)
 	s.consecWriteFailures.Store(0)
 	s.writeBreakerOpen.Store(false)
+	s.connectedAt.Store(nil)
 	s.shutdownCause.Store(nil)
 	if !s.sm.transition(StateIdle, StateConnecting) {
 		state := s.sm.State()
@@ -1521,6 +1532,8 @@ func (s *Session) runInitWithCtx(pingCtx, groupCtx context.Context) error {
 	}
 
 	s.sm.transition(StateConnecting, StateActive)
+	now := time.Now()
+	s.connectedAt.Store(&now)
 
 	return nil
 }
@@ -1657,7 +1670,6 @@ func (s *Session) Stop() {
 		<-done
 	}
 }
-
 
 func (s *Session) ensureFreshSalt(ctx context.Context) int64 {
 	if !s.saltMgr.IsExpired() {
@@ -1815,10 +1827,10 @@ func (s *Session) readLoop(ctx context.Context) (retErr error) {
 		tp := s.transport
 		authKey := s.authKey
 		authKeyID := s.authKeyID
-	updateFn := s.onUpdate
-	s.mu.RUnlock()
+		updateFn := s.onUpdate
+		s.mu.RUnlock()
 
-	tp.SetReadDeadline(time.Now().Add(s.adaptiveReadTimeout()))
+		tp.SetReadDeadline(time.Now().Add(s.adaptiveReadTimeout()))
 		data, err := tp.Recv()
 		if err != nil {
 			select {
@@ -1831,6 +1843,14 @@ func (s *Session) readLoop(ctx context.Context) (retErr error) {
 			}
 			if isTimeoutError(err) {
 				return fmt.Errorf("session: read deadline exceeded: %w", err)
+			}
+			if errors.Is(err, io.EOF) {
+				age := "unknown"
+				if at := s.connectedAt.Load(); at != nil {
+					age = time.Since(*at).Truncate(time.Second).String()
+				}
+				return fmt.Errorf("session: server closed connection (EOF) on %s after %s [sid=%d]: %w",
+					s.dc, age, s.sessionID, err)
 			}
 			return err
 		}
