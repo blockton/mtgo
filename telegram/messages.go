@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mtgo-labs/mtgo/telegram/params"
 	"github.com/mtgo-labs/mtgo/telegram/parser"
@@ -10,16 +11,20 @@ import (
 	"github.com/mtgo-labs/mtgo/tg"
 )
 
-// toParserMode converts a params.ParseMode string to a parser.ParseMode.
-// Returns false for default/disabled/empty modes.
-func toParserMode(mode params.ParseMode) (parser.ParseMode, bool) {
-	switch mode {
-	case params.ParseModeHTML:
-		return parser.ParseModeHTML, true
-	case params.ParseModeMarkdown:
-		return parser.ParseModeMarkdown, true
+// toParserMode normalizes and converts a params.ParseMode string to a parser.ParseMode.
+// Returns false for default/disabled/empty modes. Returns an error for unknown
+// non-empty values (e.g. typos like "HTMl") to surface the mistake immediately.
+func toParserMode(mode params.ParseMode) (parser.ParseMode, bool, error) {
+	normalized := strings.ToLower(strings.TrimSpace(string(mode)))
+	switch normalized {
+	case "html":
+		return parser.ParseModeHTML, true, nil
+	case "markdown", "markdownv2":
+		return parser.ParseModeMarkdown, true, nil
+	case "", "default", "disabled":
+		return parser.ParseModeDefault, false, nil
 	default:
-		return parser.ParseModeDefault, false
+		return parser.ParseModeDefault, false, fmt.Errorf("unknown parse mode %q (valid: html, markdown, markdownv2, disabled)", mode)
 	}
 }
 
@@ -49,13 +54,17 @@ func buildReplyTo(replyTo tg.InputReplyToClass, replyToMessageID, messageThreadI
 
 // parseText resolves the effective parse mode from opts → client default,
 // then parses formatted text into plain text + entities.
+// Returns an error if the parse mode is unknown.
 // If entities are already provided or parse mode is unset, returns text unchanged.
 func (c *Client) parseText(text string, optParseMode params.ParseMode) (string, []tg.MessageEntityClass, error) {
 	mode := optParseMode
 	if mode == "" || mode == params.ParseModeDefault {
 		mode = c.cfg.ParseMode
 	}
-	pm, ok := toParserMode(mode)
+	pm, ok, err := toParserMode(mode)
+	if err != nil {
+		return "", nil, err
+	}
 	if !ok {
 		return text, nil, nil
 	}

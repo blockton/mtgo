@@ -206,6 +206,137 @@ func TestFlatToSendMsg_SendSticker(t *testing.T) {
 	assertFlatFields(t, v.ToSendMsg())
 }
 
+// --- flatToSendMsg parse mode propagation ----------------------------------
+
+
+func TestFlatToSendMsg_ParseModePropagation(t *testing.T) {
+	tests := []struct {
+		name         string
+		construct    func() *SendMessage
+		wantMode     ParseMode
+		wantEntities bool // true = non-nil
+	}{
+		{
+			"SendPhoto",
+			func() *SendMessage {
+				return (&SendPhoto{
+					ParseMode:       ParseModeHTML,
+					CaptionEntities: []tl.MessageEntityClass{&tl.MessageEntityBold{Offset: 0, Length: 1}},
+				}).ToSendMsg()
+			},
+			ParseModeHTML, true,
+		},
+		{
+			"SendVideo",
+			func() *SendMessage {
+				return (&SendVideo{
+					ParseMode:       ParseModeMarkdown,
+					CaptionEntities: []tl.MessageEntityClass{&tl.MessageEntityItalic{Offset: 0, Length: 1}},
+				}).ToSendMsg()
+			},
+			ParseModeMarkdown, true,
+		},
+		{
+			"SendAudio",
+			func() *SendMessage {
+				return (&SendAudio{
+					ParseMode:       ParseModeHTML,
+					CaptionEntities: nil,
+				}).ToSendMsg()
+			},
+			ParseModeHTML, false,
+		},
+		{
+			"SendDocument",
+			func() *SendMessage {
+				return (&SendDocument{
+					ParseMode:       ParseModeMarkdown,
+					CaptionEntities: []tl.MessageEntityClass{&tl.MessageEntityCode{Offset: 0, Length: 1}},
+				}).ToSendMsg()
+			},
+			ParseModeMarkdown, true,
+		},
+		{
+			"SendAnimation",
+			func() *SendMessage {
+				return (&SendAnimation{
+					ParseMode:       ParseModeDisabled,
+					CaptionEntities: nil,
+				}).ToSendMsg()
+			},
+			ParseModeDisabled, false,
+		},
+		{
+			"SendVoice",
+			func() *SendMessage {
+				return (&SendVoice{
+					ParseMode:       ParseModeHTML,
+					CaptionEntities: []tl.MessageEntityClass{&tl.MessageEntityTextURL{Offset: 0, Length: 1, URL: "https://example.com"}},
+				}).ToSendMsg()
+			},
+			ParseModeHTML, true,
+		},
+		{
+			"SendSticker",
+			func() *SendMessage {
+				return (&SendSticker{
+					ParseMode:       ParseModeMarkdown,
+					CaptionEntities: nil,
+				}).ToSendMsg()
+			},
+			ParseModeMarkdown, false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.construct()
+			if got.ParseMode != tt.wantMode {
+				t.Errorf("ParseMode = %q, want %q", got.ParseMode, tt.wantMode)
+			}
+			if tt.wantEntities && got.Entities == nil {
+				t.Error("Entities is nil, want non-nil")
+			}
+			if !tt.wantEntities && got.Entities != nil {
+				t.Errorf("Entities = %v, want nil", got.Entities)
+			}
+		})
+	}
+}
+
+func TestFlatToSendMsg_ZeroParseModePropagated(t *testing.T) {
+	// When ParseMode is empty string and CaptionEntities nil, those zero values
+	// should be propagated (empty string, nil slice) — not silently dropped.
+	v := &SendPhoto{}
+	got := v.ToSendMsg()
+	if got.ParseMode != "" {
+		t.Errorf("ParseMode = %q, want empty", got.ParseMode)
+	}
+	if got.Entities != nil {
+		t.Errorf("Entities = %v, want nil", got.Entities)
+	}
+}
+
+func TestFlatToSendMsg_NonMediaTypesPreserveDefaults(t *testing.T) {
+	// Non-media types (SendPoll, SendVenue, etc.) don't implement parseModeProvider.
+	// Their ToSendMsg should still work (ParseMode stays empty string).
+	v := &SendPoll{
+		DisableNotification: true,
+		Silent:              true,
+		ReplyToMessageID:    99,
+	}
+	got := v.ToSendMsg()
+	if got.ParseMode != "" {
+		t.Errorf("non-media type ParseMode = %q, want empty", got.ParseMode)
+	}
+	if got.Entities != nil {
+		t.Errorf("non-media type Entities = %v, want nil", got.Entities)
+	}
+	if got.ReplyToMessageID != 99 {
+		t.Errorf("ReplyToMessageID = %d, want 99", got.ReplyToMessageID)
+	}
+}
+
 // --- SendMediaGroup special case: drops ReplyMarkup ------------------------
 
 func TestFlatToSendMsg_SendMediaGroupDropsReplyMarkup(t *testing.T) {

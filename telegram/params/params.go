@@ -127,6 +127,7 @@ type EditMessage struct {
 	ReplyMarkup           tl.ReplyMarkupClass
 	ParseMode             ParseMode
 	Entities              []tl.MessageEntityClass
+	Caption               string
 	ScheduleDate          *int32
 	ShowCaptionAboveMedia bool
 	BusinessConnectionID  string
@@ -659,13 +660,20 @@ type SendInlineBotResult struct {
 	MessageThreadID      int32
 }
 
+// parseModeProvider is optionally implemented by Send* types that carry ParseMode
+// and CaptionEntities. flatToSendMsg copies them into the resulting SendMessage
+// so that sendMediaInternal can use them for caption formatting.
+type parseModeProvider interface {
+	getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass)
+}
+
 func flatToSendMsg(s interface {
 	getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32)
 },
 ) *SendMessage {
 	disableNotification, silent, background, clearDraft, noForwards,
 		replyToMessageID, replyTo, replyMarkup, scheduleDate, effectID, sendAs, messageThreadID := s.getFlatSendFields()
-	return &SendMessage{
+	sm := &SendMessage{
 		DisableNotification: disableNotification,
 		Silent:              silent,
 		Background:          background,
@@ -679,6 +687,10 @@ func flatToSendMsg(s interface {
 		SendAs:              sendAs,
 		MessageThreadID:     messageThreadID,
 	}
+	if p, ok := s.(parseModeProvider); ok {
+		sm.ParseMode, sm.Entities = p.getParseModeAndEntities()
+	}
+	return sm
 }
 
 func (s *SendPoll) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
@@ -779,6 +791,10 @@ type SendAudio struct {
 	RepeatPeriod          *int32
 }
 
+func (s *SendAudio) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
+
 func (s *SendAudio) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
 	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
@@ -833,6 +849,10 @@ type SendVideo struct {
 	VideoCover            tl.InputDocumentClass
 }
 
+func (s *SendVideo) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
+
 func (s *SendVideo) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
 	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
@@ -877,6 +897,10 @@ type SendDocument struct {
 	RepeatPeriod          *int32
 }
 
+func (s *SendDocument) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
+
 func (s *SendDocument) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
 	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
@@ -914,11 +938,15 @@ type SendPhoto struct {
 	TTLSeconds            *int32
 	ViewOnce              bool
 	ShowCaptionAboveMedia bool
+
 	BusinessConnectionID  string
 	AllowPaidBroadcast    bool
 	PaidMessageStarCount  *int64
 	MessageThreadID       int32
 	RepeatPeriod          *int32
+}
+func (s *SendPhoto) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
 }
 
 func (s *SendPhoto) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
@@ -963,11 +991,15 @@ type SendAnimation struct {
 	Height                int32
 	Unsave                bool
 	ShowCaptionAboveMedia bool
+
 	BusinessConnectionID  string
 	AllowPaidBroadcast    bool
 	PaidMessageStarCount  *int64
 	MessageThreadID       int32
 	RepeatPeriod          *int32
+}
+func (s *SendAnimation) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
 }
 
 func (s *SendAnimation) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
@@ -1005,11 +1037,15 @@ type SendVoice struct {
 	CaptionEntities       []tl.MessageEntityClass
 	ViewOnce              bool
 	ShowCaptionAboveMedia bool
+
 	BusinessConnectionID  string
 	AllowPaidBroadcast    bool
 	PaidMessageStarCount  *int64
 	MessageThreadID       int32
 	RepeatPeriod          *int32
+}
+func (s *SendVoice) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
 }
 
 func (s *SendVoice) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
@@ -1092,6 +1128,10 @@ type SendSticker struct {
 	PaidMessageStarCount *int64
 	MessageThreadID      int32
 	RepeatPeriod         *int32
+}
+
+func (s *SendSticker) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
 }
 
 func (s *SendSticker) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {

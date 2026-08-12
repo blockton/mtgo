@@ -44,10 +44,29 @@ func (c *Client) EditMessageCaption(ctx context.Context, chatID int64, messageID
 
 	opt := params.GetOptDef(&params.EditMessage{}, opts...)
 
+	// Parse formatted caption when no pre-built entities are provided.
+	sendCaption := caption
+	var parsedEntities []tg.MessageEntityClass
+	if len(opt.Entities) == 0 {
+		parsed, entities, err := c.parseText(caption, opt.ParseMode)
+		if err != nil {
+			return nil, fmt.Errorf("parse caption: %w", err)
+		}
+		sendCaption = parsed
+		parsedEntities = entities
+	}
+
 	var flags tg.Fields
 	flags.Set(11)
 	if opt.InvertMedia {
 		flags.Set(16)
+	}
+	entities := opt.Entities
+	if len(entities) == 0 {
+		entities = parsedEntities
+	}
+	if len(entities) > 0 {
+		flags.Set(3)
 	}
 
 	req := &tg.MessagesEditMessageRequest{
@@ -55,7 +74,8 @@ func (c *Client) EditMessageCaption(ctx context.Context, chatID int64, messageID
 		InvertMedia: opt.InvertMedia,
 		Peer:        peer,
 		ID:          messageID,
-		Message:     caption,
+		Message:     sendCaption,
+		Entities:    entities,
 		ReplyMarkup: opt.ReplyMarkup,
 	}
 	if opt.ScheduleDate != nil {
@@ -107,10 +127,32 @@ func (c *Client) EditMessageMedia(ctx context.Context, chatID int64, messageID i
 
 	opt := params.GetOptDef(&params.EditMessage{}, opts...)
 
+	// Parse formatted caption when provided and no pre-built entities.
+	sendCaption := opt.Caption
+	var parsedEntities []tg.MessageEntityClass
+	if sendCaption != "" && len(opt.Entities) == 0 {
+		parsed, entities, err := c.parseText(sendCaption, opt.ParseMode)
+		if err != nil {
+			return nil, fmt.Errorf("parse caption: %w", err)
+		}
+		sendCaption = parsed
+		parsedEntities = entities
+	}
+
 	var flags tg.Fields
 	flags.Set(14)
 	if opt.InvertMedia {
 		flags.Set(16)
+	}
+	if sendCaption != "" {
+		flags.Set(11)
+	}
+	entities := opt.Entities
+	if len(entities) == 0 {
+		entities = parsedEntities
+	}
+	if len(entities) > 0 {
+		flags.Set(3)
 	}
 
 	req := &tg.MessagesEditMessageRequest{
@@ -119,6 +161,8 @@ func (c *Client) EditMessageMedia(ctx context.Context, chatID int64, messageID i
 		Peer:        peer,
 		ID:          messageID,
 		Media:       media,
+		Message:     sendCaption,
+		Entities:    entities,
 		ReplyMarkup: opt.ReplyMarkup,
 	}
 	if opt.ScheduleDate != nil {
