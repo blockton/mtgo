@@ -1242,3 +1242,144 @@ func (c *RPCClient) AuthFinishPasskeyLogin(ctx context.Context, req *AuthFinishP
 	}
 	return nil, fmt.Errorf("unexpected result type %T", result)
 }
+
+// AuthInitFirebasePnvLoginTypeID is the constructor ID for the RPC function auth.initFirebasePnvLogin.
+const AuthInitFirebasePnvLoginTypeID = 0x777df37a
+
+// AuthInitFirebasePnvLoginRequest represents TL type `auth.initFirebasePnvLogin#777df37a`.
+//
+// See https://core.telegram.org/method/auth/initFirebasePnvLogin for reference.
+type AuthInitFirebasePnvLoginRequest struct {
+	APIID   int32  `json:"api_id,omitempty"`
+	APIHash string `json:"api_hash,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x777df37a.
+func (v *AuthInitFirebasePnvLoginRequest) ConstructorID() uint32 {
+	return AuthInitFirebasePnvLoginTypeID
+}
+
+// Encode serializes AuthInitFirebasePnvLoginRequest to a bytes.Buffer using the TL binary protocol.
+func (v *AuthInitFirebasePnvLoginRequest) Encode(b *bytes.Buffer) error {
+	WriteInt(b, AuthInitFirebasePnvLoginTypeID)
+	WriteInt(b, uint32(v.APIID))
+	WriteString(b, v.APIHash)
+	return nil
+}
+
+// AuthInitFirebasePnvLogin invokes the auth.initFirebasePnvLogin RPC method on the server.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - req: the request parameters
+//
+// Returns the result of the RPC call, or an error if the invocation fails.
+func (c *RPCClient) AuthInitFirebasePnvLogin(ctx context.Context, req *AuthInitFirebasePnvLoginRequest) (*AuthFirebasePnvIntent, error) {
+	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
+		return ReadTLObject(r)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _c, _ok := result.(*AuthFirebasePnvIntent); _ok {
+		return _c, nil
+	}
+	return nil, fmt.Errorf("unexpected result type %T", result)
+}
+
+// AuthFinishFirebasePnvLoginTypeID is the constructor ID for the RPC function auth.finishFirebasePnvLogin.
+const AuthFinishFirebasePnvLoginTypeID = 0x2c85094c
+
+// AuthFinishFirebasePnvLoginRequest represents TL type `auth.finishFirebasePnvLogin#2c85094c`.
+//
+// See https://core.telegram.org/method/auth/finishFirebasePnvLogin for reference.
+type AuthFinishFirebasePnvLoginRequest struct {
+	GoogleToken string `json:"google_token,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x2c85094c.
+func (v *AuthFinishFirebasePnvLoginRequest) ConstructorID() uint32 {
+	return AuthFinishFirebasePnvLoginTypeID
+}
+
+// Encode serializes AuthFinishFirebasePnvLoginRequest to a bytes.Buffer using the TL binary protocol.
+func (v *AuthFinishFirebasePnvLoginRequest) Encode(b *bytes.Buffer) error {
+	WriteInt(b, AuthFinishFirebasePnvLoginTypeID)
+	WriteString(b, v.GoogleToken)
+	return nil
+}
+
+// AuthFinishFirebasePnvLogin invokes the auth.finishFirebasePnvLogin RPC method on the server.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - req: the request parameters
+//
+// Returns the result of the RPC call, or an error if the invocation fails.
+func (c *RPCClient) AuthFinishFirebasePnvLogin(ctx context.Context, req *AuthFinishFirebasePnvLoginRequest) (AuthorizationClass, error) {
+	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
+		return ReadTLObject(r)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _c, _ok := result.(AuthorizationClass); _ok {
+		return _c, nil
+	}
+	return nil, fmt.Errorf("unexpected result type %T", result)
+}
+
+// AuthFirebasePnvSignUpTypeID is the constructor ID for the RPC function auth.firebasePnvSignUp.
+const AuthFirebasePnvSignUpTypeID = 0x783f6b56
+
+// AuthFirebasePnvSignUpRequest represents TL type `auth.firebasePnvSignUp#783f6b56`.
+//
+// See https://core.telegram.org/method/auth/firebasePnvSignUp for reference.
+type AuthFirebasePnvSignUpRequest struct {
+	Flags                 Fields `json:"-"`
+	NoJoinedNotifications bool   `json:"no_joined_notifications,omitempty"`
+	FirstName             string `json:"first_name,omitempty"`
+	LastName              string `json:"last_name,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *AuthFirebasePnvSignUpRequest) SetFlags() {
+	if v.NoJoinedNotifications {
+		v.Flags.Set(0)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x783f6b56.
+func (v *AuthFirebasePnvSignUpRequest) ConstructorID() uint32 {
+	return AuthFirebasePnvSignUpTypeID
+}
+
+// Encode serializes AuthFirebasePnvSignUpRequest to a bytes.Buffer using the TL binary protocol.
+func (v *AuthFirebasePnvSignUpRequest) Encode(b *bytes.Buffer) error {
+	WriteInt(b, AuthFirebasePnvSignUpTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteString(b, v.FirstName)
+	WriteString(b, v.LastName)
+	return nil
+}
+
+// AuthFirebasePnvSignUp invokes the auth.firebasePnvSignUp RPC method on the server.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - req: the request parameters
+//
+// Returns the result of the RPC call, or an error if the invocation fails.
+func (c *RPCClient) AuthFirebasePnvSignUp(ctx context.Context, req *AuthFirebasePnvSignUpRequest) (AuthorizationClass, error) {
+	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
+		return ReadTLObject(r)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _c, _ok := result.(AuthorizationClass); _ok {
+		return _c, nil
+	}
+	return nil, fmt.Errorf("unexpected result type %T", result)
+}

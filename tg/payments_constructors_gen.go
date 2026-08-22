@@ -34,7 +34,7 @@ var ConstructorMapPayments = map[uint32]func() TLObject{
 	0x4a5f5bd9: func() TLObject { return &InputInvoiceStarGiftTransfer{} },
 	0xdabab2ef: func() TLObject { return &InputInvoicePremiumGiftStars{} },
 	0xf4997e42: func() TLObject { return &InputInvoiceBusinessBotTransferStars{} },
-	0xc39f5324: func() TLObject { return &InputInvoiceStarGiftResale{} },
+	0xe9b0c658: func() TLObject { return &InputInvoiceStarGiftResale{} },
 	0x9a0b48b8: func() TLObject { return &InputInvoiceStarGiftPrepaidUpgrade{} },
 	0x3e77f614: func() TLObject { return &InputInvoicePremiumAuthCode{} },
 	0x0923d8d1: func() TLObject { return &InputInvoiceStarGiftDropOriginalDetails{} },

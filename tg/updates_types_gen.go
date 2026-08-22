@@ -504,6 +504,9 @@ const UpdateDeleteEphemeralMessagesTypeID = 0x56dbfcf8
 // UpdateEditEphemeralMessageTypeID is the constructor ID for TL type updateEditEphemeralMessage.
 const UpdateEditEphemeralMessageTypeID = 0x4bbb8f01
 
+// UpdateEphemeralBotCallbackQueryTypeID is the constructor ID for TL type updateEphemeralBotCallbackQuery.
+const UpdateEphemeralBotCallbackQueryTypeID = 0x7c1079d6
+
 // UpdateBotStarsSubscriptionTypeID is the constructor ID for TL type updateBotStarsSubscription.
 const UpdateBotStarsSubscriptionTypeID = 0x6c0d8e23
 
@@ -995,6 +998,9 @@ func (*UpdateDeleteEphemeralMessages) isUpdate() {}
 
 // isUpdate marks UpdateEditEphemeralMessage as implementing the UpdateClass interface.
 func (*UpdateEditEphemeralMessage) isUpdate() {}
+
+// isUpdate marks UpdateEphemeralBotCallbackQuery as implementing the UpdateClass interface.
+func (*UpdateEphemeralBotCallbackQuery) isUpdate() {}
 
 // isUpdate marks UpdateBotStarsSubscription as implementing the UpdateClass interface.
 func (*UpdateBotStarsSubscription) isUpdate() {}
@@ -10632,6 +10638,118 @@ func DecodeUpdateEditEphemeralMessage(r *Reader) (*UpdateEditEphemeralMessage, e
 func init() {
 	Registry[UpdateEditEphemeralMessageTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeUpdateEditEphemeralMessage(r)
+	}
+}
+
+// UpdateEphemeralBotCallbackQuery represents the TL constructor updateEphemeralBotCallbackQuery (0x7c1079d6).
+//
+// See https://core.telegram.org/constructor/updateEphemeralBotCallbackQuery for reference.
+type UpdateEphemeralBotCallbackQuery struct {
+	Flags        Fields            `json:"-"`
+	QueryID      int64             `json:"query_id,omitempty"`
+	UserID       int64             `json:"user_id,omitempty"`
+	Peer         PeerClass         `json:"peer,omitempty"`
+	MsgID        int32             `json:"msg_id,omitempty"`
+	Data         []byte            `json:"data,omitempty"`
+	ChatInstance int64             `json:"chat_instance,omitempty"`
+	Message      *EphemeralMessage `json:"message,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *UpdateEphemeralBotCallbackQuery) SetFlags() {
+	if v.Peer != nil {
+		v.Flags.Set(0)
+	}
+	if v.ChatInstance != 0 {
+		v.Flags.Set(1)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x7c1079d6.
+func (v *UpdateEphemeralBotCallbackQuery) ConstructorID() uint32 {
+	return UpdateEphemeralBotCallbackQueryTypeID
+}
+
+// Encode serializes UpdateEphemeralBotCallbackQuery to a bytes.Buffer using the TL binary protocol.
+func (v *UpdateEphemeralBotCallbackQuery) Encode(b *bytes.Buffer) error {
+	WriteInt(b, UpdateEphemeralBotCallbackQueryTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteLong(b, v.QueryID)
+	WriteLong(b, v.UserID)
+	if v.Flags.Has(0) {
+		EncodeTLObject(b, v.Peer)
+	}
+	WriteInt(b, uint32(v.MsgID))
+	WriteBytes(b, v.Data)
+	if v.Flags.Has(1) {
+		WriteLong(b, v.ChatInstance)
+	}
+	EncodeTLObject(b, v.Message)
+	return nil
+}
+
+// DecodeUpdateEphemeralBotCallbackQuery deserializes a UpdateEphemeralBotCallbackQuery from a reader using the TL binary protocol.
+func DecodeUpdateEphemeralBotCallbackQuery(r *Reader) (*UpdateEphemeralBotCallbackQuery, error) {
+	v := &UpdateEphemeralBotCallbackQuery{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	_rQueryID, _eQueryID := r.ReadInt64()
+	if _eQueryID != nil {
+		return nil, _eQueryID
+	}
+	v.QueryID = _rQueryID
+	_rUserID, _eUserID := r.ReadInt64()
+	if _eUserID != nil {
+		return nil, _eUserID
+	}
+	v.UserID = _rUserID
+	if v.Flags.Has(0) {
+		_objPeer, _errPeer := ReadTLObject(r)
+		if _errPeer != nil {
+			return nil, _errPeer
+		}
+		_cPeer, _okPeer := _objPeer.(PeerClass)
+		if !_okPeer {
+			return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+		}
+		v.Peer = _cPeer
+	}
+	_rMsgID, _eMsgID := r.ReadInt32()
+	if _eMsgID != nil {
+		return nil, _eMsgID
+	}
+	v.MsgID = _rMsgID
+	_rData, _eData := r.ReadBytes()
+	if _eData != nil {
+		return nil, _eData
+	}
+	v.Data = _rData
+	if v.Flags.Has(1) {
+		_rChatInstance, _eChatInstance := r.ReadInt64()
+		if _eChatInstance != nil {
+			return nil, _eChatInstance
+		}
+		v.ChatInstance = _rChatInstance
+	}
+	_objMessage, _errMessage := ReadTLObject(r)
+	if _errMessage != nil {
+		return nil, _errMessage
+	}
+	_cMessage, _okMessage := _objMessage.(*EphemeralMessage)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
+	return v, nil
+}
+
+func init() {
+	Registry[UpdateEphemeralBotCallbackQueryTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeUpdateEphemeralBotCallbackQuery(r)
 	}
 }
 

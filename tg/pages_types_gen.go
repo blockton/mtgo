@@ -105,6 +105,9 @@ const TextDateTypeID = 0xa5b45e2b
 // TextDiffTypeID is the constructor ID for TL type textDiff.
 const TextDiffTypeID = 0x9686cb50
 
+// TextButtonTypeID is the constructor ID for TL type textButton.
+const TextButtonTypeID = 0xafc79cd6
+
 // isRichText marks TextEmpty as implementing the RichTextClass interface.
 func (*TextEmpty) isRichText() {}
 
@@ -194,6 +197,9 @@ func (*TextDate) isRichText() {}
 
 // isRichText marks TextDiff as implementing the RichTextClass interface.
 func (*TextDiff) isRichText() {}
+
+// isRichText marks TextButton as implementing the RichTextClass interface.
+func (*TextButton) isRichText() {}
 
 // TextEmpty represents the TL constructor textEmpty (0xdc3d824f).
 //
@@ -1512,6 +1518,87 @@ func init() {
 	}
 }
 
+// TextButton represents the TL constructor textButton (0xafc79cd6).
+//
+// See https://core.telegram.org/constructor/textButton for reference.
+type TextButton struct {
+	Flags Fields                `json:"-"`
+	Text  RichTextClass         `json:"text,omitempty"`
+	Type  InlineButtonTypeClass `json:"type,omitempty"`
+	Style *RichButtonStyle      `json:"style,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *TextButton) SetFlags() {
+	if v.Style != nil {
+		v.Flags.Set(0)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0xafc79cd6.
+func (v *TextButton) ConstructorID() uint32 {
+	return TextButtonTypeID
+}
+
+// Encode serializes TextButton to a bytes.Buffer using the TL binary protocol.
+func (v *TextButton) Encode(b *bytes.Buffer) error {
+	WriteInt(b, TextButtonTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	EncodeTLObject(b, v.Text)
+	EncodeTLObject(b, v.Type)
+	if v.Flags.Has(0) {
+		EncodeTLObject(b, v.Style)
+	}
+	return nil
+}
+
+// DecodeTextButton deserializes a TextButton from a reader using the TL binary protocol.
+func DecodeTextButton(r *Reader) (*TextButton, error) {
+	v := &TextButton{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	_objText, _errText := ReadTLObject(r)
+	if _errText != nil {
+		return nil, _errText
+	}
+	_cText, _okText := _objText.(RichTextClass)
+	if !_okText {
+		return nil, fmt.Errorf("decode: field text: unexpected type %T", _objText)
+	}
+	v.Text = _cText
+	_objType, _errType := ReadTLObject(r)
+	if _errType != nil {
+		return nil, _errType
+	}
+	_cType, _okType := _objType.(InlineButtonTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
+	if v.Flags.Has(0) {
+		_objStyle, _errStyle := ReadTLObject(r)
+		if _errStyle != nil {
+			return nil, _errStyle
+		}
+		_cStyle, _okStyle := _objStyle.(*RichButtonStyle)
+		if !_okStyle {
+			return nil, fmt.Errorf("decode: field style: unexpected type %T", _objStyle)
+		}
+		v.Style = _cStyle
+	}
+	return v, nil
+}
+
+func init() {
+	Registry[TextButtonTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeTextButton(r)
+	}
+}
+
 // PageBlockClass is the interface for TL type PageBlock.
 // Implementations must satisfy TLObject and are used to represent
 // any constructor of the PageBlock TL type.
@@ -1557,7 +1644,7 @@ const PageBlockAnchorTypeID = 0xce0d37b0
 const PageBlockListTypeID = 0xe4e88011
 
 // PageBlockBlockquoteTypeID is the constructor ID for TL type pageBlockBlockquote.
-const PageBlockBlockquoteTypeID = 0x263d7c26
+const PageBlockBlockquoteTypeID = 0x66d1670b
 
 // PageBlockPullquoteTypeID is the constructor ID for TL type pageBlockPullquote.
 const PageBlockPullquoteTypeID = 0x4f4456d3
@@ -1636,6 +1723,12 @@ const InputPageBlockMapTypeID = 0x574b617f
 
 // PageBlockBlockquoteBlocksTypeID is the constructor ID for TL type pageBlockBlockquoteBlocks.
 const PageBlockBlockquoteBlocksTypeID = 0x0e6e47c4
+
+// PageBlockButtonRowTypeID is the constructor ID for TL type pageBlockButtonRow.
+const PageBlockButtonRowTypeID = 0x6d640318
+
+// PageBlockDocumentTypeID is the constructor ID for TL type pageBlockDocument.
+const PageBlockDocumentTypeID = 0x38fa3ba3
 
 // isPageBlock marks PageBlockUnsupported as implementing the PageBlockClass interface.
 func (*PageBlockUnsupported) isPageBlock() {}
@@ -1753,6 +1846,12 @@ func (*InputPageBlockMap) isPageBlock() {}
 
 // isPageBlock marks PageBlockBlockquoteBlocks as implementing the PageBlockClass interface.
 func (*PageBlockBlockquoteBlocks) isPageBlock() {}
+
+// isPageBlock marks PageBlockButtonRow as implementing the PageBlockClass interface.
+func (*PageBlockButtonRow) isPageBlock() {}
+
+// isPageBlock marks PageBlockDocument as implementing the PageBlockClass interface.
+func (*PageBlockDocument) isPageBlock() {}
 
 // PageBlockUnsupported represents the TL constructor pageBlockUnsupported (0x13567e8a).
 //
@@ -2243,15 +2342,24 @@ func init() {
 	}
 }
 
-// PageBlockBlockquote represents the TL constructor pageBlockBlockquote (0x263d7c26).
+// PageBlockBlockquote represents the TL constructor pageBlockBlockquote (0x66d1670b).
 //
 // See https://core.telegram.org/constructor/pageBlockBlockquote for reference.
 type PageBlockBlockquote struct {
-	Text    RichTextClass `json:"text,omitempty"`
-	Caption RichTextClass `json:"caption,omitempty"`
+	Flags     Fields        `json:"-"`
+	Collapsed bool          `json:"collapsed,omitempty"`
+	Text      RichTextClass `json:"text,omitempty"`
+	Caption   RichTextClass `json:"caption,omitempty"`
 }
 
-// ConstructorID returns the TL constructor identifier 0x263d7c26.
+// SetFlags computes flags from non-zero optional fields.
+func (v *PageBlockBlockquote) SetFlags() {
+	if v.Collapsed {
+		v.Flags.Set(0)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x66d1670b.
 func (v *PageBlockBlockquote) ConstructorID() uint32 {
 	return PageBlockBlockquoteTypeID
 }
@@ -2259,6 +2367,8 @@ func (v *PageBlockBlockquote) ConstructorID() uint32 {
 // Encode serializes PageBlockBlockquote to a bytes.Buffer using the TL binary protocol.
 func (v *PageBlockBlockquote) Encode(b *bytes.Buffer) error {
 	WriteInt(b, PageBlockBlockquoteTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
 	EncodeTLObject(b, v.Text)
 	EncodeTLObject(b, v.Caption)
 	return nil
@@ -2267,6 +2377,12 @@ func (v *PageBlockBlockquote) Encode(b *bytes.Buffer) error {
 // DecodePageBlockBlockquote deserializes a PageBlockBlockquote from a reader using the TL binary protocol.
 func DecodePageBlockBlockquote(r *Reader) (*PageBlockBlockquote, error) {
 	v := &PageBlockBlockquote{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.Collapsed = v.Flags.Has(0)
 	_objText, _errText := ReadTLObject(r)
 	if _errText != nil {
 		return nil, _errText
@@ -3068,6 +3184,7 @@ type PageBlockTable struct {
 	Flags    Fields          `json:"-"`
 	Bordered bool            `json:"bordered,omitempty"`
 	Striped  bool            `json:"striped,omitempty"`
+	Compact  bool            `json:"compact,omitempty"`
 	Title    RichTextClass   `json:"title,omitempty"`
 	Rows     []*PageTableRow `json:"rows,omitempty"`
 }
@@ -3079,6 +3196,9 @@ func (v *PageBlockTable) SetFlags() {
 	}
 	if v.Striped {
 		v.Flags.Set(1)
+	}
+	if v.Compact {
+		v.Flags.Set(2)
 	}
 }
 
@@ -3111,6 +3231,7 @@ func DecodePageBlockTable(r *Reader) (*PageBlockTable, error) {
 	v.Flags = Fields(_rFlags)
 	v.Bordered = v.Flags.Has(0)
 	v.Striped = v.Flags.Has(1)
+	v.Compact = v.Flags.Has(2)
 	_objTitle, _errTitle := ReadTLObject(r)
 	if _errTitle != nil {
 		return nil, _errTitle
@@ -3951,6 +4072,141 @@ func DecodePageBlockBlockquoteBlocks(r *Reader) (*PageBlockBlockquoteBlocks, err
 func init() {
 	Registry[PageBlockBlockquoteBlocksTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodePageBlockBlockquoteBlocks(r)
+	}
+}
+
+// PageBlockButtonRow represents the TL constructor pageBlockButtonRow (0x6d640318).
+//
+// See https://core.telegram.org/constructor/pageBlockButtonRow for reference.
+type PageBlockButtonRow struct {
+	Flags       Fields        `json:"-"`
+	AlignLeft   bool          `json:"align_left,omitempty"`
+	AlignCenter bool          `json:"align_center,omitempty"`
+	AlignRight  bool          `json:"align_right,omitempty"`
+	Buttons     []*PageButton `json:"buttons,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *PageBlockButtonRow) SetFlags() {
+	if v.AlignLeft {
+		v.Flags.Set(0)
+	}
+	if v.AlignCenter {
+		v.Flags.Set(1)
+	}
+	if v.AlignRight {
+		v.Flags.Set(2)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x6d640318.
+func (v *PageBlockButtonRow) ConstructorID() uint32 {
+	return PageBlockButtonRowTypeID
+}
+
+// Encode serializes PageBlockButtonRow to a bytes.Buffer using the TL binary protocol.
+func (v *PageBlockButtonRow) Encode(b *bytes.Buffer) error {
+	WriteInt(b, PageBlockButtonRowTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteInt(b, 0x1cb5c415)
+	WriteInt(b, uint32(len(v.Buttons)))
+	for _, _item := range v.Buttons {
+		EncodeTLObject(b, _item)
+	}
+	return nil
+}
+
+// DecodePageBlockButtonRow deserializes a PageBlockButtonRow from a reader using the TL binary protocol.
+func DecodePageBlockButtonRow(r *Reader) (*PageBlockButtonRow, error) {
+	v := &PageBlockButtonRow{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.AlignLeft = v.Flags.Has(0)
+	v.AlignCenter = v.Flags.Has(1)
+	v.AlignRight = v.Flags.Has(2)
+	_vhdrButtons, _ehdrButtons := r.ReadUint32()
+	if _ehdrButtons != nil {
+		return nil, _ehdrButtons
+	}
+	if _errButtons := checkVectorConstructor(_vhdrButtons); _errButtons != nil {
+		return nil, _errButtons
+	}
+	_cntButtons, _ecntButtons := r.ReadUint32()
+	if _ecntButtons != nil {
+		return nil, _ecntButtons
+	}
+	if _errButtons := checkVectorCount(_cntButtons); _errButtons != nil {
+		return nil, _errButtons
+	}
+	v.Buttons = make([]*PageButton, _cntButtons)
+	for _iButtons := range v.Buttons {
+		_objButtons, _errButtons := ReadTLObject(r)
+		if _errButtons != nil {
+			return nil, _errButtons
+		}
+		_cButtons, _okButtons := _objButtons.(*PageButton)
+		if !_okButtons {
+			return nil, fmt.Errorf("decode: field buttons: unexpected type %T", _objButtons)
+		}
+		v.Buttons[_iButtons] = _cButtons
+	}
+	return v, nil
+}
+
+func init() {
+	Registry[PageBlockButtonRowTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodePageBlockButtonRow(r)
+	}
+}
+
+// PageBlockDocument represents the TL constructor pageBlockDocument (0x38fa3ba3).
+//
+// See https://core.telegram.org/constructor/pageBlockDocument for reference.
+type PageBlockDocument struct {
+	DocumentID int64        `json:"document_id,omitempty"`
+	Caption    *PageCaption `json:"caption,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x38fa3ba3.
+func (v *PageBlockDocument) ConstructorID() uint32 {
+	return PageBlockDocumentTypeID
+}
+
+// Encode serializes PageBlockDocument to a bytes.Buffer using the TL binary protocol.
+func (v *PageBlockDocument) Encode(b *bytes.Buffer) error {
+	WriteInt(b, PageBlockDocumentTypeID)
+	WriteLong(b, v.DocumentID)
+	EncodeTLObject(b, v.Caption)
+	return nil
+}
+
+// DecodePageBlockDocument deserializes a PageBlockDocument from a reader using the TL binary protocol.
+func DecodePageBlockDocument(r *Reader) (*PageBlockDocument, error) {
+	v := &PageBlockDocument{}
+	_rDocumentID, _eDocumentID := r.ReadInt64()
+	if _eDocumentID != nil {
+		return nil, _eDocumentID
+	}
+	v.DocumentID = _rDocumentID
+	_objCaption, _errCaption := ReadTLObject(r)
+	if _errCaption != nil {
+		return nil, _errCaption
+	}
+	_cCaption, _okCaption := _objCaption.(*PageCaption)
+	if !_okCaption {
+		return nil, fmt.Errorf("decode: field caption: unexpected type %T", _objCaption)
+	}
+	v.Caption = _cCaption
+	return v, nil
+}
+
+func init() {
+	Registry[PageBlockDocumentTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodePageBlockDocument(r)
 	}
 }
 
@@ -4902,5 +5158,89 @@ func DecodePage(r *Reader) (*Page, error) {
 func init() {
 	Registry[PageTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodePage(r)
+	}
+}
+
+// PageButtonTypeID is the constructor ID for TL type pageButton.
+const PageButtonTypeID = 0x692a5488
+
+// PageButton represents the TL constructor pageButton (0x692a5488).
+//
+// See https://core.telegram.org/constructor/pageButton for reference.
+type PageButton struct {
+	Flags Fields                `json:"-"`
+	Text  RichTextClass         `json:"text,omitempty"`
+	Type  InlineButtonTypeClass `json:"type,omitempty"`
+	Style *RichButtonStyle      `json:"style,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *PageButton) SetFlags() {
+	if v.Style != nil {
+		v.Flags.Set(0)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x692a5488.
+func (v *PageButton) ConstructorID() uint32 {
+	return PageButtonTypeID
+}
+
+// Encode serializes PageButton to a bytes.Buffer using the TL binary protocol.
+func (v *PageButton) Encode(b *bytes.Buffer) error {
+	WriteInt(b, PageButtonTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	EncodeTLObject(b, v.Text)
+	EncodeTLObject(b, v.Type)
+	if v.Flags.Has(0) {
+		EncodeTLObject(b, v.Style)
+	}
+	return nil
+}
+
+// DecodePageButton deserializes a PageButton from a reader using the TL binary protocol.
+func DecodePageButton(r *Reader) (*PageButton, error) {
+	v := &PageButton{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	_objText, _errText := ReadTLObject(r)
+	if _errText != nil {
+		return nil, _errText
+	}
+	_cText, _okText := _objText.(RichTextClass)
+	if !_okText {
+		return nil, fmt.Errorf("decode: field text: unexpected type %T", _objText)
+	}
+	v.Text = _cText
+	_objType, _errType := ReadTLObject(r)
+	if _errType != nil {
+		return nil, _errType
+	}
+	_cType, _okType := _objType.(InlineButtonTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
+	if v.Flags.Has(0) {
+		_objStyle, _errStyle := ReadTLObject(r)
+		if _errStyle != nil {
+			return nil, _errStyle
+		}
+		_cStyle, _okStyle := _objStyle.(*RichButtonStyle)
+		if !_okStyle {
+			return nil, fmt.Errorf("decode: field style: unexpected type %T", _objStyle)
+		}
+		v.Style = _cStyle
+	}
+	return v, nil
+}
+
+func init() {
+	Registry[PageButtonTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodePageButton(r)
 	}
 }

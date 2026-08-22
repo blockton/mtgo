@@ -9,13 +9,17 @@ import (
 )
 
 // EphemeralSendMessageTypeID is the constructor ID for the RPC function ephemeral.sendMessage.
-const EphemeralSendMessageTypeID = 0x68cbd09f
+const EphemeralSendMessageTypeID = 0xba8d5f35
 
-// EphemeralSendMessageRequest represents TL type `ephemeral.sendMessage#68cbd09f`.
+// EphemeralSendMessageRequest represents TL type `ephemeral.sendMessage#ba8d5f35`.
 //
 // See https://core.telegram.org/method/ephemeral/sendMessage for reference.
 type EphemeralSendMessageRequest struct {
 	Flags       Fields                `json:"-"`
+	InvertMedia bool                  `json:"invert_media,omitempty"`
+	Welcome     bool                  `json:"welcome,omitempty"`
+	Anchor      bool                  `json:"anchor,omitempty"`
+	Noforwards  bool                  `json:"noforwards,omitempty"`
 	Peer        InputPeerClass        `json:"peer,omitempty"`
 	ReceiverID  InputUserClass        `json:"receiver_id,omitempty"`
 	QueryID     int64                 `json:"query_id,omitempty"`
@@ -30,6 +34,21 @@ type EphemeralSendMessageRequest struct {
 
 // SetFlags computes flags from non-zero optional fields.
 func (v *EphemeralSendMessageRequest) SetFlags() {
+	if v.InvertMedia {
+		v.Flags.Set(6)
+	}
+	if v.Welcome {
+		v.Flags.Set(7)
+	}
+	if v.Anchor {
+		v.Flags.Set(9)
+	}
+	if v.Noforwards {
+		v.Flags.Set(10)
+	}
+	if v.Peer != nil {
+		v.Flags.Set(8)
+	}
 	if v.QueryID != 0 {
 		v.Flags.Set(0)
 	}
@@ -50,7 +69,7 @@ func (v *EphemeralSendMessageRequest) SetFlags() {
 	}
 }
 
-// ConstructorID returns the TL constructor identifier 0x68cbd09f.
+// ConstructorID returns the TL constructor identifier 0xba8d5f35.
 func (v *EphemeralSendMessageRequest) ConstructorID() uint32 {
 	return EphemeralSendMessageTypeID
 }
@@ -60,7 +79,9 @@ func (v *EphemeralSendMessageRequest) Encode(b *bytes.Buffer) error {
 	WriteInt(b, EphemeralSendMessageTypeID)
 	v.SetFlags()
 	WriteInt(b, uint32(v.Flags))
-	EncodeTLObject(b, v.Peer)
+	if v.Flags.Has(8) {
+		EncodeTLObject(b, v.Peer)
+	}
 	EncodeTLObject(b, v.ReceiverID)
 	if v.Flags.Has(0) {
 		WriteLong(b, v.QueryID)
@@ -110,18 +131,26 @@ func (c *RPCClient) EphemeralSendMessage(ctx context.Context, req *EphemeralSend
 }
 
 // EphemeralDeleteMessageTypeID is the constructor ID for the RPC function ephemeral.deleteMessage.
-const EphemeralDeleteMessageTypeID = 0xa3c0d511
+const EphemeralDeleteMessageTypeID = 0x92f6e797
 
-// EphemeralDeleteMessageRequest represents TL type `ephemeral.deleteMessage#a3c0d511`.
+// EphemeralDeleteMessageRequest represents TL type `ephemeral.deleteMessage#92f6e797`.
 //
 // See https://core.telegram.org/method/ephemeral/deleteMessage for reference.
 type EphemeralDeleteMessageRequest struct {
+	Flags      Fields         `json:"-"`
 	Peer       InputPeerClass `json:"peer,omitempty"`
 	ReceiverID InputUserClass `json:"receiver_id,omitempty"`
 	ID         int32          `json:"id,omitempty"`
 }
 
-// ConstructorID returns the TL constructor identifier 0xa3c0d511.
+// SetFlags computes flags from non-zero optional fields.
+func (v *EphemeralDeleteMessageRequest) SetFlags() {
+	if v.Peer != nil {
+		v.Flags.Set(0)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x92f6e797.
 func (v *EphemeralDeleteMessageRequest) ConstructorID() uint32 {
 	return EphemeralDeleteMessageTypeID
 }
@@ -129,7 +158,11 @@ func (v *EphemeralDeleteMessageRequest) ConstructorID() uint32 {
 // Encode serializes EphemeralDeleteMessageRequest to a bytes.Buffer using the TL binary protocol.
 func (v *EphemeralDeleteMessageRequest) Encode(b *bytes.Buffer) error {
 	WriteInt(b, EphemeralDeleteMessageTypeID)
-	EncodeTLObject(b, v.Peer)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	if v.Flags.Has(0) {
+		EncodeTLObject(b, v.Peer)
+	}
 	EncodeTLObject(b, v.ReceiverID)
 	WriteInt(b, uint32(v.ID))
 	return nil
@@ -254,6 +287,237 @@ func (c *RPCClient) EphemeralGetCallbackAnswer(ctx context.Context, req *Ephemer
 		return nil, err
 	}
 	if _c, _ok := result.(*MessagesBotCallbackAnswer); _ok {
+		return _c, nil
+	}
+	return nil, fmt.Errorf("unexpected result type %T", result)
+}
+
+// EphemeralEditMessageTypeID is the constructor ID for the RPC function ephemeral.editMessage.
+const EphemeralEditMessageTypeID = 0xcf9c725b
+
+// EphemeralEditMessageRequest represents TL type `ephemeral.editMessage#cf9c725b`.
+//
+// See https://core.telegram.org/method/ephemeral/editMessage for reference.
+type EphemeralEditMessageRequest struct {
+	Flags       Fields                `json:"-"`
+	InvertMedia bool                  `json:"invert_media,omitempty"`
+	Welcome     bool                  `json:"welcome,omitempty"`
+	Peer        InputPeerClass        `json:"peer,omitempty"`
+	ReceiverID  InputUserClass        `json:"receiver_id,omitempty"`
+	ID          int32                 `json:"id,omitempty"`
+	Message     string                `json:"message,omitempty"`
+	Media       InputMediaClass       `json:"media,omitempty"`
+	Entities    []MessageEntityClass  `json:"entities,omitempty"`
+	ReplyMarkup ReplyMarkupClass      `json:"reply_markup,omitempty"`
+	RichMessage InputRichMessageClass `json:"rich_message,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *EphemeralEditMessageRequest) SetFlags() {
+	if v.InvertMedia {
+		v.Flags.Set(5)
+	}
+	if v.Welcome {
+		v.Flags.Set(6)
+	}
+	if v.Peer != nil {
+		v.Flags.Set(7)
+	}
+	if v.Message != "" {
+		v.Flags.Set(0)
+	}
+	if v.Media != nil {
+		v.Flags.Set(3)
+	}
+	if v.Entities != nil {
+		v.Flags.Set(1)
+	}
+	if v.ReplyMarkup != nil {
+		v.Flags.Set(2)
+	}
+	if v.RichMessage != nil {
+		v.Flags.Set(4)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0xcf9c725b.
+func (v *EphemeralEditMessageRequest) ConstructorID() uint32 {
+	return EphemeralEditMessageTypeID
+}
+
+// Encode serializes EphemeralEditMessageRequest to a bytes.Buffer using the TL binary protocol.
+func (v *EphemeralEditMessageRequest) Encode(b *bytes.Buffer) error {
+	WriteInt(b, EphemeralEditMessageTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	if v.Flags.Has(7) {
+		EncodeTLObject(b, v.Peer)
+	}
+	EncodeTLObject(b, v.ReceiverID)
+	WriteInt(b, uint32(v.ID))
+	if v.Flags.Has(0) {
+		WriteString(b, v.Message)
+	}
+	if v.Flags.Has(3) {
+		EncodeTLObject(b, v.Media)
+	}
+	if v.Flags.Has(1) {
+		WriteInt(b, 0x1cb5c415)
+		WriteInt(b, uint32(len(v.Entities)))
+		for _, _item := range v.Entities {
+			EncodeTLObject(b, _item)
+		}
+	}
+	if v.Flags.Has(2) {
+		EncodeTLObject(b, v.ReplyMarkup)
+	}
+	if v.Flags.Has(4) {
+		EncodeTLObject(b, v.RichMessage)
+	}
+	return nil
+}
+
+// EphemeralEditMessage invokes the ephemeral.editMessage RPC method on the server.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - req: the request parameters
+//
+// Returns the result of the RPC call, or an error if the invocation fails.
+func (c *RPCClient) EphemeralEditMessage(ctx context.Context, req *EphemeralEditMessageRequest) (UpdatesClass, error) {
+	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
+		return ReadTLObject(r)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _c, _ok := result.(UpdatesClass); _ok {
+		return _c, nil
+	}
+	return nil, fmt.Errorf("unexpected result type %T", result)
+}
+
+// EphemeralDeleteWelcomeMessageTypeID is the constructor ID for the RPC function ephemeral.deleteWelcomeMessage.
+const EphemeralDeleteWelcomeMessageTypeID = 0xe882a9e1
+
+// EphemeralDeleteWelcomeMessageRequest represents TL type `ephemeral.deleteWelcomeMessage#e882a9e1`.
+//
+// See https://core.telegram.org/method/ephemeral/deleteWelcomeMessage for reference.
+type EphemeralDeleteWelcomeMessageRequest struct {
+	Peer InputPeerClass `json:"peer,omitempty"`
+	ID   int32          `json:"id,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0xe882a9e1.
+func (v *EphemeralDeleteWelcomeMessageRequest) ConstructorID() uint32 {
+	return EphemeralDeleteWelcomeMessageTypeID
+}
+
+// Encode serializes EphemeralDeleteWelcomeMessageRequest to a bytes.Buffer using the TL binary protocol.
+func (v *EphemeralDeleteWelcomeMessageRequest) Encode(b *bytes.Buffer) error {
+	WriteInt(b, EphemeralDeleteWelcomeMessageTypeID)
+	EncodeTLObject(b, v.Peer)
+	WriteInt(b, uint32(v.ID))
+	return nil
+}
+
+// EphemeralDeleteWelcomeMessage invokes the ephemeral.deleteWelcomeMessage RPC method on the server.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - req: the request parameters
+//
+// Returns the result of the RPC call, or an error if the invocation fails.
+func (c *RPCClient) EphemeralDeleteWelcomeMessage(ctx context.Context, req *EphemeralDeleteWelcomeMessageRequest) (bool, error) {
+	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
+		return ReadTLObject(r)
+	})
+	if err != nil {
+		return false, err
+	}
+	_ = result
+	return true, nil
+}
+
+// EphemeralDeleteAllWelcomeMessagesTypeID is the constructor ID for the RPC function ephemeral.deleteAllWelcomeMessages.
+const EphemeralDeleteAllWelcomeMessagesTypeID = 0x734f9721
+
+// EphemeralDeleteAllWelcomeMessagesRequest represents TL type `ephemeral.deleteAllWelcomeMessages#734f9721`.
+//
+// See https://core.telegram.org/method/ephemeral/deleteAllWelcomeMessages for reference.
+type EphemeralDeleteAllWelcomeMessagesRequest struct {
+	Peer InputPeerClass `json:"peer,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x734f9721.
+func (v *EphemeralDeleteAllWelcomeMessagesRequest) ConstructorID() uint32 {
+	return EphemeralDeleteAllWelcomeMessagesTypeID
+}
+
+// Encode serializes EphemeralDeleteAllWelcomeMessagesRequest to a bytes.Buffer using the TL binary protocol.
+func (v *EphemeralDeleteAllWelcomeMessagesRequest) Encode(b *bytes.Buffer) error {
+	WriteInt(b, EphemeralDeleteAllWelcomeMessagesTypeID)
+	EncodeTLObject(b, v.Peer)
+	return nil
+}
+
+// EphemeralDeleteAllWelcomeMessages invokes the ephemeral.deleteAllWelcomeMessages RPC method on the server.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - req: the request parameters
+//
+// Returns the result of the RPC call, or an error if the invocation fails.
+func (c *RPCClient) EphemeralDeleteAllWelcomeMessages(ctx context.Context, req *EphemeralDeleteAllWelcomeMessagesRequest) (bool, error) {
+	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
+		return ReadTLObject(r)
+	})
+	if err != nil {
+		return false, err
+	}
+	_ = result
+	return true, nil
+}
+
+// EphemeralGetWelcomeMessagesTypeID is the constructor ID for the RPC function ephemeral.getWelcomeMessages.
+const EphemeralGetWelcomeMessagesTypeID = 0xdb9ac18d
+
+// EphemeralGetWelcomeMessagesRequest represents TL type `ephemeral.getWelcomeMessages#db9ac18d`.
+//
+// See https://core.telegram.org/method/ephemeral/getWelcomeMessages for reference.
+type EphemeralGetWelcomeMessagesRequest struct {
+	Peer InputPeerClass `json:"peer,omitempty"`
+	Hash int64          `json:"hash,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0xdb9ac18d.
+func (v *EphemeralGetWelcomeMessagesRequest) ConstructorID() uint32 {
+	return EphemeralGetWelcomeMessagesTypeID
+}
+
+// Encode serializes EphemeralGetWelcomeMessagesRequest to a bytes.Buffer using the TL binary protocol.
+func (v *EphemeralGetWelcomeMessagesRequest) Encode(b *bytes.Buffer) error {
+	WriteInt(b, EphemeralGetWelcomeMessagesTypeID)
+	EncodeTLObject(b, v.Peer)
+	WriteLong(b, v.Hash)
+	return nil
+}
+
+// EphemeralGetWelcomeMessages invokes the ephemeral.getWelcomeMessages RPC method on the server.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - req: the request parameters
+//
+// Returns the result of the RPC call, or an error if the invocation fails.
+func (c *RPCClient) EphemeralGetWelcomeMessages(ctx context.Context, req *EphemeralGetWelcomeMessagesRequest) (WelcomeMessagesClass, error) {
+	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
+		return ReadTLObject(r)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _c, _ok := result.(WelcomeMessagesClass); _ok {
 		return _c, nil
 	}
 	return nil, fmt.Errorf("unexpected result type %T", result)

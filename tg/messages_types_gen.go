@@ -47,6 +47,7 @@ type ChatFull struct {
 	CanSetUsername         bool                    `json:"can_set_username,omitempty"`
 	HasScheduled           bool                    `json:"has_scheduled,omitempty"`
 	TranslationsDisabled   bool                    `json:"translations_disabled,omitempty"`
+	HasWelcomeMessages     bool                    `json:"has_welcome_messages,omitempty"`
 	ID                     int64                   `json:"id,omitempty"`
 	About                  string                  `json:"about,omitempty"`
 	Participants           ChatParticipantsClass   `json:"participants,omitempty"`
@@ -76,6 +77,9 @@ func (v *ChatFull) SetFlags() {
 	}
 	if v.TranslationsDisabled {
 		v.Flags.Set(19)
+	}
+	if v.HasWelcomeMessages {
+		v.Flags.Set(21)
 	}
 	if v.ChatPhoto != nil {
 		v.Flags.Set(2)
@@ -189,6 +193,7 @@ func DecodeChatFull(r *Reader) (*ChatFull, error) {
 	v.CanSetUsername = v.Flags.Has(7)
 	v.HasScheduled = v.Flags.Has(8)
 	v.TranslationsDisabled = v.Flags.Has(19)
+	v.HasWelcomeMessages = v.Flags.Has(21)
 	_rID, _eID := r.ReadInt64()
 	if _eID != nil {
 		return nil, _eID
@@ -385,6 +390,7 @@ type ChannelFull struct {
 	PaidReactionsAvailable bool                    `json:"paid_reactions_available,omitempty"`
 	StargiftsAvailable     bool                    `json:"stargifts_available,omitempty"`
 	PaidMessagesAvailable  bool                    `json:"paid_messages_available,omitempty"`
+	HasWelcomeMessages     bool                    `json:"has_welcome_messages,omitempty"`
 	ID                     int64                   `json:"id,omitempty"`
 	About                  string                  `json:"about,omitempty"`
 	ParticipantsCount      int32                   `json:"participants_count,omitempty"`
@@ -497,6 +503,9 @@ func (v *ChannelFull) SetFlags() {
 	}
 	if v.PaidMessagesAvailable {
 		v.Flags2.Set(20)
+	}
+	if v.HasWelcomeMessages {
+		v.Flags2.Set(24)
 	}
 	if v.ParticipantsCount != 0 {
 		v.Flags.Set(0)
@@ -783,6 +792,7 @@ func DecodeChannelFull(r *Reader) (*ChannelFull, error) {
 	v.PaidReactionsAvailable = v.Flags2.Has(16)
 	v.StargiftsAvailable = v.Flags2.Has(19)
 	v.PaidMessagesAvailable = v.Flags2.Has(20)
+	v.HasWelcomeMessages = v.Flags2.Has(24)
 	_rID, _eID := r.ReadInt64()
 	if _eID != nil {
 		return nil, _eID
@@ -4223,7 +4233,7 @@ const MessageActionPrizeStarsTypeID = 0xb00c47a2
 const MessageActionStarGiftTypeID = 0xea2c31d3
 
 // MessageActionStarGiftUniqueTypeID is the constructor ID for TL type messageActionStarGiftUnique.
-const MessageActionStarGiftUniqueTypeID = 0xe6c31522
+const MessageActionStarGiftUniqueTypeID = 0x7e1c1187
 
 // MessageActionPaidMessagesRefundedTypeID is the constructor ID for TL type messageActionPaidMessagesRefunded.
 const MessageActionPaidMessagesRefundedTypeID = 0xac1f1fcd
@@ -7436,30 +7446,32 @@ func init() {
 	}
 }
 
-// MessageActionStarGiftUnique represents the TL constructor messageActionStarGiftUnique (0xe6c31522).
+// MessageActionStarGiftUnique represents the TL constructor messageActionStarGiftUnique (0x7e1c1187).
 //
 // See https://core.telegram.org/constructor/messageActionStarGiftUnique for reference.
 type MessageActionStarGiftUnique struct {
-	Flags                    Fields           `json:"-"`
-	Upgrade                  bool             `json:"upgrade,omitempty"`
-	Transferred              bool             `json:"transferred,omitempty"`
-	Saved                    bool             `json:"saved,omitempty"`
-	Refunded                 bool             `json:"refunded,omitempty"`
-	PrepaidUpgrade           bool             `json:"prepaid_upgrade,omitempty"`
-	Assigned                 bool             `json:"assigned,omitempty"`
-	FromOffer                bool             `json:"from_offer,omitempty"`
-	Craft                    bool             `json:"craft,omitempty"`
-	Gift                     StarGiftClass    `json:"gift,omitempty"`
-	CanExportAt              int32            `json:"can_export_at,omitempty"`
-	TransferStars            int64            `json:"transfer_stars,omitempty"`
-	FromID                   PeerClass        `json:"from_id,omitempty"`
-	Peer                     PeerClass        `json:"peer,omitempty"`
-	SavedID                  int64            `json:"saved_id,omitempty"`
-	ResaleAmount             StarsAmountClass `json:"resale_amount,omitempty"`
-	CanTransferAt            int32            `json:"can_transfer_at,omitempty"`
-	CanResellAt              int32            `json:"can_resell_at,omitempty"`
-	DropOriginalDetailsStars int64            `json:"drop_original_details_stars,omitempty"`
-	CanCraftAt               int32            `json:"can_craft_at,omitempty"`
+	Flags                    Fields            `json:"-"`
+	Upgrade                  bool              `json:"upgrade,omitempty"`
+	Transferred              bool              `json:"transferred,omitempty"`
+	Saved                    bool              `json:"saved,omitempty"`
+	Refunded                 bool              `json:"refunded,omitempty"`
+	PrepaidUpgrade           bool              `json:"prepaid_upgrade,omitempty"`
+	Assigned                 bool              `json:"assigned,omitempty"`
+	FromOffer                bool              `json:"from_offer,omitempty"`
+	Craft                    bool              `json:"craft,omitempty"`
+	NameHidden               bool              `json:"name_hidden,omitempty"`
+	Gift                     StarGiftClass     `json:"gift,omitempty"`
+	CanExportAt              int32             `json:"can_export_at,omitempty"`
+	TransferStars            int64             `json:"transfer_stars,omitempty"`
+	FromID                   PeerClass         `json:"from_id,omitempty"`
+	Peer                     PeerClass         `json:"peer,omitempty"`
+	SavedID                  int64             `json:"saved_id,omitempty"`
+	ResaleAmount             StarsAmountClass  `json:"resale_amount,omitempty"`
+	CanTransferAt            int32             `json:"can_transfer_at,omitempty"`
+	CanResellAt              int32             `json:"can_resell_at,omitempty"`
+	DropOriginalDetailsStars int64             `json:"drop_original_details_stars,omitempty"`
+	CanCraftAt               int32             `json:"can_craft_at,omitempty"`
+	Message                  *TextWithEntities `json:"message,omitempty"`
 }
 
 // SetFlags computes flags from non-zero optional fields.
@@ -7487,6 +7499,9 @@ func (v *MessageActionStarGiftUnique) SetFlags() {
 	}
 	if v.Craft {
 		v.Flags.Set(16)
+	}
+	if v.NameHidden {
+		v.Flags.Set(17)
 	}
 	if v.CanExportAt != 0 {
 		v.Flags.Set(3)
@@ -7518,9 +7533,12 @@ func (v *MessageActionStarGiftUnique) SetFlags() {
 	if v.CanCraftAt != 0 {
 		v.Flags.Set(15)
 	}
+	if v.Message != nil {
+		v.Flags.Set(18)
+	}
 }
 
-// ConstructorID returns the TL constructor identifier 0xe6c31522.
+// ConstructorID returns the TL constructor identifier 0x7e1c1187.
 func (v *MessageActionStarGiftUnique) ConstructorID() uint32 {
 	return MessageActionStarGiftUniqueTypeID
 }
@@ -7561,6 +7579,9 @@ func (v *MessageActionStarGiftUnique) Encode(b *bytes.Buffer) error {
 	if v.Flags.Has(15) {
 		WriteInt(b, uint32(v.CanCraftAt))
 	}
+	if v.Flags.Has(18) {
+		EncodeTLObject(b, v.Message)
+	}
 	return nil
 }
 
@@ -7580,6 +7601,7 @@ func DecodeMessageActionStarGiftUnique(r *Reader) (*MessageActionStarGiftUnique,
 	v.Assigned = v.Flags.Has(13)
 	v.FromOffer = v.Flags.Has(14)
 	v.Craft = v.Flags.Has(16)
+	v.NameHidden = v.Flags.Has(17)
 	_objGift, _errGift := ReadTLObject(r)
 	if _errGift != nil {
 		return nil, _errGift
@@ -7670,6 +7692,17 @@ func DecodeMessageActionStarGiftUnique(r *Reader) (*MessageActionStarGiftUnique,
 			return nil, _eCanCraftAt
 		}
 		v.CanCraftAt = _rCanCraftAt
+	}
+	if v.Flags.Has(18) {
+		_objMessage, _errMessage := ReadTLObject(r)
+		if _errMessage != nil {
+			return nil, _errMessage
+		}
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	return v, nil
 }
@@ -11854,13 +11887,16 @@ const SendMessageEmojiInteractionTypeID = 0x25972bcb
 const SendMessageEmojiInteractionSeenTypeID = 0xb665902e
 
 // SendMessageTextDraftActionTypeID is the constructor ID for TL type sendMessageTextDraftAction.
-const SendMessageTextDraftActionTypeID = 0x376d975c
+const SendMessageTextDraftActionTypeID = 0x3630b85a
 
 // InputSendMessageRichMessageDraftActionTypeID is the constructor ID for TL type inputSendMessageRichMessageDraftAction.
-const InputSendMessageRichMessageDraftActionTypeID = 0xe2b23b51
+const InputSendMessageRichMessageDraftActionTypeID = 0xa937c7be
 
 // SendMessageRichMessageDraftActionTypeID is the constructor ID for TL type sendMessageRichMessageDraftAction.
-const SendMessageRichMessageDraftActionTypeID = 0xa2cb24f9
+const SendMessageRichMessageDraftActionTypeID = 0x52564893
+
+// SendMessageStopDraftActionTypeID is the constructor ID for TL type sendMessageStopDraftAction.
+const SendMessageStopDraftActionTypeID = 0xfbf902b0
 
 // isSendMessageAction marks SendMessageTypingAction as implementing the SendMessageActionClass interface.
 func (*SendMessageTypingAction) isSendMessageAction() {}
@@ -11924,6 +11960,9 @@ func (*InputSendMessageRichMessageDraftAction) isSendMessageAction() {}
 
 // isSendMessageAction marks SendMessageRichMessageDraftAction as implementing the SendMessageActionClass interface.
 func (*SendMessageRichMessageDraftAction) isSendMessageAction() {}
+
+// isSendMessageAction marks SendMessageStopDraftAction as implementing the SendMessageActionClass interface.
+func (*SendMessageStopDraftAction) isSendMessageAction() {}
 
 // SendMessageTypingAction represents the TL constructor sendMessageTypingAction (0x16bf744e).
 //
@@ -12521,15 +12560,28 @@ func init() {
 	}
 }
 
-// SendMessageTextDraftAction represents the TL constructor sendMessageTextDraftAction (0x376d975c).
+// SendMessageTextDraftAction represents the TL constructor sendMessageTextDraftAction (0x3630b85a).
 //
 // See https://core.telegram.org/constructor/sendMessageTextDraftAction for reference.
 type SendMessageTextDraftAction struct {
-	RandomID int64             `json:"random_id,omitempty"`
-	Text     *TextWithEntities `json:"text,omitempty"`
+	Flags      Fields            `json:"-"`
+	CanStop    bool              `json:"can_stop,omitempty"`
+	KeepOnStop bool              `json:"keep_on_stop,omitempty"`
+	RandomID   int64             `json:"random_id,omitempty"`
+	Text       *TextWithEntities `json:"text,omitempty"`
 }
 
-// ConstructorID returns the TL constructor identifier 0x376d975c.
+// SetFlags computes flags from non-zero optional fields.
+func (v *SendMessageTextDraftAction) SetFlags() {
+	if v.CanStop {
+		v.Flags.Set(0)
+	}
+	if v.KeepOnStop {
+		v.Flags.Set(1)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x3630b85a.
 func (v *SendMessageTextDraftAction) ConstructorID() uint32 {
 	return SendMessageTextDraftActionTypeID
 }
@@ -12537,6 +12589,8 @@ func (v *SendMessageTextDraftAction) ConstructorID() uint32 {
 // Encode serializes SendMessageTextDraftAction to a bytes.Buffer using the TL binary protocol.
 func (v *SendMessageTextDraftAction) Encode(b *bytes.Buffer) error {
 	WriteInt(b, SendMessageTextDraftActionTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
 	WriteLong(b, v.RandomID)
 	EncodeTLObject(b, v.Text)
 	return nil
@@ -12545,6 +12599,13 @@ func (v *SendMessageTextDraftAction) Encode(b *bytes.Buffer) error {
 // DecodeSendMessageTextDraftAction deserializes a SendMessageTextDraftAction from a reader using the TL binary protocol.
 func DecodeSendMessageTextDraftAction(r *Reader) (*SendMessageTextDraftAction, error) {
 	v := &SendMessageTextDraftAction{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.CanStop = v.Flags.Has(0)
+	v.KeepOnStop = v.Flags.Has(1)
 	_rRandomID, _eRandomID := r.ReadInt64()
 	if _eRandomID != nil {
 		return nil, _eRandomID
@@ -12568,15 +12629,28 @@ func init() {
 	}
 }
 
-// InputSendMessageRichMessageDraftAction represents the TL constructor inputSendMessageRichMessageDraftAction (0xe2b23b51).
+// InputSendMessageRichMessageDraftAction represents the TL constructor inputSendMessageRichMessageDraftAction (0xa937c7be).
 //
 // See https://core.telegram.org/constructor/inputSendMessageRichMessageDraftAction for reference.
 type InputSendMessageRichMessageDraftAction struct {
+	Flags       Fields                `json:"-"`
+	CanStop     bool                  `json:"can_stop,omitempty"`
+	KeepOnStop  bool                  `json:"keep_on_stop,omitempty"`
 	RandomID    int64                 `json:"random_id,omitempty"`
 	RichMessage InputRichMessageClass `json:"rich_message,omitempty"`
 }
 
-// ConstructorID returns the TL constructor identifier 0xe2b23b51.
+// SetFlags computes flags from non-zero optional fields.
+func (v *InputSendMessageRichMessageDraftAction) SetFlags() {
+	if v.CanStop {
+		v.Flags.Set(0)
+	}
+	if v.KeepOnStop {
+		v.Flags.Set(1)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0xa937c7be.
 func (v *InputSendMessageRichMessageDraftAction) ConstructorID() uint32 {
 	return InputSendMessageRichMessageDraftActionTypeID
 }
@@ -12584,6 +12658,8 @@ func (v *InputSendMessageRichMessageDraftAction) ConstructorID() uint32 {
 // Encode serializes InputSendMessageRichMessageDraftAction to a bytes.Buffer using the TL binary protocol.
 func (v *InputSendMessageRichMessageDraftAction) Encode(b *bytes.Buffer) error {
 	WriteInt(b, InputSendMessageRichMessageDraftActionTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
 	WriteLong(b, v.RandomID)
 	EncodeTLObject(b, v.RichMessage)
 	return nil
@@ -12592,6 +12668,13 @@ func (v *InputSendMessageRichMessageDraftAction) Encode(b *bytes.Buffer) error {
 // DecodeInputSendMessageRichMessageDraftAction deserializes a InputSendMessageRichMessageDraftAction from a reader using the TL binary protocol.
 func DecodeInputSendMessageRichMessageDraftAction(r *Reader) (*InputSendMessageRichMessageDraftAction, error) {
 	v := &InputSendMessageRichMessageDraftAction{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.CanStop = v.Flags.Has(0)
+	v.KeepOnStop = v.Flags.Has(1)
 	_rRandomID, _eRandomID := r.ReadInt64()
 	if _eRandomID != nil {
 		return nil, _eRandomID
@@ -12615,15 +12698,28 @@ func init() {
 	}
 }
 
-// SendMessageRichMessageDraftAction represents the TL constructor sendMessageRichMessageDraftAction (0xa2cb24f9).
+// SendMessageRichMessageDraftAction represents the TL constructor sendMessageRichMessageDraftAction (0x52564893).
 //
 // See https://core.telegram.org/constructor/sendMessageRichMessageDraftAction for reference.
 type SendMessageRichMessageDraftAction struct {
+	Flags       Fields       `json:"-"`
+	CanStop     bool         `json:"can_stop,omitempty"`
+	KeepOnStop  bool         `json:"keep_on_stop,omitempty"`
 	RandomID    int64        `json:"random_id,omitempty"`
 	RichMessage *RichMessage `json:"rich_message,omitempty"`
 }
 
-// ConstructorID returns the TL constructor identifier 0xa2cb24f9.
+// SetFlags computes flags from non-zero optional fields.
+func (v *SendMessageRichMessageDraftAction) SetFlags() {
+	if v.CanStop {
+		v.Flags.Set(0)
+	}
+	if v.KeepOnStop {
+		v.Flags.Set(1)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x52564893.
 func (v *SendMessageRichMessageDraftAction) ConstructorID() uint32 {
 	return SendMessageRichMessageDraftActionTypeID
 }
@@ -12631,6 +12727,8 @@ func (v *SendMessageRichMessageDraftAction) ConstructorID() uint32 {
 // Encode serializes SendMessageRichMessageDraftAction to a bytes.Buffer using the TL binary protocol.
 func (v *SendMessageRichMessageDraftAction) Encode(b *bytes.Buffer) error {
 	WriteInt(b, SendMessageRichMessageDraftActionTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
 	WriteLong(b, v.RandomID)
 	EncodeTLObject(b, v.RichMessage)
 	return nil
@@ -12639,6 +12737,13 @@ func (v *SendMessageRichMessageDraftAction) Encode(b *bytes.Buffer) error {
 // DecodeSendMessageRichMessageDraftAction deserializes a SendMessageRichMessageDraftAction from a reader using the TL binary protocol.
 func DecodeSendMessageRichMessageDraftAction(r *Reader) (*SendMessageRichMessageDraftAction, error) {
 	v := &SendMessageRichMessageDraftAction{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.CanStop = v.Flags.Has(0)
+	v.KeepOnStop = v.Flags.Has(1)
 	_rRandomID, _eRandomID := r.ReadInt64()
 	if _eRandomID != nil {
 		return nil, _eRandomID
@@ -12659,6 +12764,42 @@ func DecodeSendMessageRichMessageDraftAction(r *Reader) (*SendMessageRichMessage
 func init() {
 	Registry[SendMessageRichMessageDraftActionTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeSendMessageRichMessageDraftAction(r)
+	}
+}
+
+// SendMessageStopDraftAction represents the TL constructor sendMessageStopDraftAction (0xfbf902b0).
+//
+// See https://core.telegram.org/constructor/sendMessageStopDraftAction for reference.
+type SendMessageStopDraftAction struct {
+	RandomID int64 `json:"random_id,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0xfbf902b0.
+func (v *SendMessageStopDraftAction) ConstructorID() uint32 {
+	return SendMessageStopDraftActionTypeID
+}
+
+// Encode serializes SendMessageStopDraftAction to a bytes.Buffer using the TL binary protocol.
+func (v *SendMessageStopDraftAction) Encode(b *bytes.Buffer) error {
+	WriteInt(b, SendMessageStopDraftActionTypeID)
+	WriteLong(b, v.RandomID)
+	return nil
+}
+
+// DecodeSendMessageStopDraftAction deserializes a SendMessageStopDraftAction from a reader using the TL binary protocol.
+func DecodeSendMessageStopDraftAction(r *Reader) (*SendMessageStopDraftAction, error) {
+	v := &SendMessageStopDraftAction{}
+	_rRandomID, _eRandomID := r.ReadInt64()
+	if _eRandomID != nil {
+		return nil, _eRandomID
+	}
+	v.RandomID = _rRandomID
+	return v, nil
+}
+
+func init() {
+	Registry[SendMessageStopDraftActionTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeSendMessageStopDraftAction(r)
 	}
 }
 
@@ -32302,31 +32443,49 @@ func init() {
 }
 
 // EphemeralMessageTypeID is the constructor ID for TL type ephemeralMessage.
-const EphemeralMessageTypeID = 0xd9c6dc1a
+const EphemeralMessageTypeID = 0xdd27bee9
 
-// EphemeralMessage represents the TL constructor ephemeralMessage (0xd9c6dc1a).
+// EphemeralMessage represents the TL constructor ephemeralMessage (0xdd27bee9).
 //
 // See https://core.telegram.org/constructor/ephemeralMessage for reference.
 type EphemeralMessage struct {
-	Flags       Fields                  `json:"-"`
-	Out         bool                    `json:"out,omitempty"`
-	ID          int32                   `json:"id,omitempty"`
-	FromID      PeerClass               `json:"from_id,omitempty"`
-	PeerID      PeerClass               `json:"peer_id,omitempty"`
-	ReceiverID  int64                   `json:"receiver_id,omitempty"`
-	TopMsgID    int32                   `json:"top_msg_id,omitempty"`
-	Date        int32                   `json:"date,omitempty"`
-	Message     string                  `json:"message,omitempty"`
-	Entities    []MessageEntityClass    `json:"entities,omitempty"`
-	Media       MessageMediaClass       `json:"media,omitempty"`
-	ReplyMarkup ReplyMarkupClass        `json:"reply_markup,omitempty"`
-	ReplyTo     MessageReplyHeaderClass `json:"reply_to,omitempty"`
+	Flags           Fields                  `json:"-"`
+	Out             bool                    `json:"out,omitempty"`
+	WelcomeTemplate bool                    `json:"welcome_template,omitempty"`
+	InvertMedia     bool                    `json:"invert_media,omitempty"`
+	Noforwards      bool                    `json:"noforwards,omitempty"`
+	ID              int32                   `json:"id,omitempty"`
+	FromID          PeerClass               `json:"from_id,omitempty"`
+	PeerID          PeerClass               `json:"peer_id,omitempty"`
+	ReceiverID      int64                   `json:"receiver_id,omitempty"`
+	TopMsgID        int32                   `json:"top_msg_id,omitempty"`
+	Date            int32                   `json:"date,omitempty"`
+	Message         string                  `json:"message,omitempty"`
+	Entities        []MessageEntityClass    `json:"entities,omitempty"`
+	Media           MessageMediaClass       `json:"media,omitempty"`
+	ReplyMarkup     ReplyMarkupClass        `json:"reply_markup,omitempty"`
+	ReplyTo         MessageReplyHeaderClass `json:"reply_to,omitempty"`
+	RichMessage     *RichMessage            `json:"rich_message,omitempty"`
+	ChatInstance    int64                   `json:"chat_instance,omitempty"`
+	AnchorMsgID     int32                   `json:"anchor_msg_id,omitempty"`
 }
 
 // SetFlags computes flags from non-zero optional fields.
 func (v *EphemeralMessage) SetFlags() {
 	if v.Out {
 		v.Flags.Set(0)
+	}
+	if v.WelcomeTemplate {
+		v.Flags.Set(5)
+	}
+	if v.InvertMedia {
+		v.Flags.Set(7)
+	}
+	if v.Noforwards {
+		v.Flags.Set(12)
+	}
+	if v.PeerID != nil {
+		v.Flags.Set(9)
 	}
 	if v.TopMsgID != 0 {
 		v.Flags.Set(1)
@@ -32343,9 +32502,18 @@ func (v *EphemeralMessage) SetFlags() {
 	if v.ReplyTo != nil {
 		v.Flags.Set(6)
 	}
+	if v.RichMessage != nil {
+		v.Flags.Set(8)
+	}
+	if v.ChatInstance != 0 {
+		v.Flags.Set(10)
+	}
+	if v.AnchorMsgID != 0 {
+		v.Flags.Set(11)
+	}
 }
 
-// ConstructorID returns the TL constructor identifier 0xd9c6dc1a.
+// ConstructorID returns the TL constructor identifier 0xdd27bee9.
 func (v *EphemeralMessage) ConstructorID() uint32 {
 	return EphemeralMessageTypeID
 }
@@ -32357,7 +32525,9 @@ func (v *EphemeralMessage) Encode(b *bytes.Buffer) error {
 	WriteInt(b, uint32(v.Flags))
 	WriteInt(b, uint32(v.ID))
 	EncodeTLObject(b, v.FromID)
-	EncodeTLObject(b, v.PeerID)
+	if v.Flags.Has(9) {
+		EncodeTLObject(b, v.PeerID)
+	}
 	WriteLong(b, v.ReceiverID)
 	if v.Flags.Has(1) {
 		WriteInt(b, uint32(v.TopMsgID))
@@ -32380,6 +32550,15 @@ func (v *EphemeralMessage) Encode(b *bytes.Buffer) error {
 	if v.Flags.Has(6) {
 		EncodeTLObject(b, v.ReplyTo)
 	}
+	if v.Flags.Has(8) {
+		EncodeTLObject(b, v.RichMessage)
+	}
+	if v.Flags.Has(10) {
+		WriteLong(b, v.ChatInstance)
+	}
+	if v.Flags.Has(11) {
+		WriteInt(b, uint32(v.AnchorMsgID))
+	}
 	return nil
 }
 
@@ -32392,6 +32571,9 @@ func DecodeEphemeralMessage(r *Reader) (*EphemeralMessage, error) {
 	}
 	v.Flags = Fields(_rFlags)
 	v.Out = v.Flags.Has(0)
+	v.WelcomeTemplate = v.Flags.Has(5)
+	v.InvertMedia = v.Flags.Has(7)
+	v.Noforwards = v.Flags.Has(12)
 	_rID, _eID := r.ReadInt32()
 	if _eID != nil {
 		return nil, _eID
@@ -32406,15 +32588,17 @@ func DecodeEphemeralMessage(r *Reader) (*EphemeralMessage, error) {
 		return nil, fmt.Errorf("decode: field from_id: unexpected type %T", _objFromID)
 	}
 	v.FromID = _cFromID
-	_objPeerID, _errPeerID := ReadTLObject(r)
-	if _errPeerID != nil {
-		return nil, _errPeerID
+	if v.Flags.Has(9) {
+		_objPeerID, _errPeerID := ReadTLObject(r)
+		if _errPeerID != nil {
+			return nil, _errPeerID
+		}
+		_cPeerID, _okPeerID := _objPeerID.(PeerClass)
+		if !_okPeerID {
+			return nil, fmt.Errorf("decode: field peer_id: unexpected type %T", _objPeerID)
+		}
+		v.PeerID = _cPeerID
 	}
-	_cPeerID, _okPeerID := _objPeerID.(PeerClass)
-	if !_okPeerID {
-		return nil, fmt.Errorf("decode: field peer_id: unexpected type %T", _objPeerID)
-	}
-	v.PeerID = _cPeerID
 	_rReceiverID, _eReceiverID := r.ReadInt64()
 	if _eReceiverID != nil {
 		return nil, _eReceiverID
@@ -32497,6 +32681,31 @@ func DecodeEphemeralMessage(r *Reader) (*EphemeralMessage, error) {
 			return nil, fmt.Errorf("decode: field reply_to: unexpected type %T", _objReplyTo)
 		}
 		v.ReplyTo = _cReplyTo
+	}
+	if v.Flags.Has(8) {
+		_objRichMessage, _errRichMessage := ReadTLObject(r)
+		if _errRichMessage != nil {
+			return nil, _errRichMessage
+		}
+		_cRichMessage, _okRichMessage := _objRichMessage.(*RichMessage)
+		if !_okRichMessage {
+			return nil, fmt.Errorf("decode: field rich_message: unexpected type %T", _objRichMessage)
+		}
+		v.RichMessage = _cRichMessage
+	}
+	if v.Flags.Has(10) {
+		_rChatInstance, _eChatInstance := r.ReadInt64()
+		if _eChatInstance != nil {
+			return nil, _eChatInstance
+		}
+		v.ChatInstance = _rChatInstance
+	}
+	if v.Flags.Has(11) {
+		_rAnchorMsgID, _eAnchorMsgID := r.ReadInt32()
+		if _eAnchorMsgID != nil {
+			return nil, _eAnchorMsgID
+		}
+		v.AnchorMsgID = _rAnchorMsgID
 	}
 	return v, nil
 }

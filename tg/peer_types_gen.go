@@ -9554,25 +9554,26 @@ const ChatAdminRightsTypeID = 0x5fb224d5
 //
 // See https://core.telegram.org/constructor/chatAdminRights for reference.
 type ChatAdminRights struct {
-	Flags                Fields `json:"-"`
-	ChangeInfo           bool   `json:"change_info,omitempty"`
-	PostMessages         bool   `json:"post_messages,omitempty"`
-	EditMessages         bool   `json:"edit_messages,omitempty"`
-	DeleteMessages       bool   `json:"delete_messages,omitempty"`
-	BanUsers             bool   `json:"ban_users,omitempty"`
-	InviteUsers          bool   `json:"invite_users,omitempty"`
-	PinMessages          bool   `json:"pin_messages,omitempty"`
-	AddAdmins            bool   `json:"add_admins,omitempty"`
-	Anonymous            bool   `json:"anonymous,omitempty"`
-	ManageCall           bool   `json:"manage_call,omitempty"`
-	Other                bool   `json:"other,omitempty"`
-	ManageTopics         bool   `json:"manage_topics,omitempty"`
-	PostStories          bool   `json:"post_stories,omitempty"`
-	EditStories          bool   `json:"edit_stories,omitempty"`
-	DeleteStories        bool   `json:"delete_stories,omitempty"`
-	ManageDirectMessages bool   `json:"manage_direct_messages,omitempty"`
-	ManageRanks          bool   `json:"manage_ranks,omitempty"`
-	ManageLinkedPeers    bool   `json:"manage_linked_peers,omitempty"`
+	Flags                 Fields `json:"-"`
+	ChangeInfo            bool   `json:"change_info,omitempty"`
+	PostMessages          bool   `json:"post_messages,omitempty"`
+	EditMessages          bool   `json:"edit_messages,omitempty"`
+	DeleteMessages        bool   `json:"delete_messages,omitempty"`
+	BanUsers              bool   `json:"ban_users,omitempty"`
+	InviteUsers           bool   `json:"invite_users,omitempty"`
+	PinMessages           bool   `json:"pin_messages,omitempty"`
+	AddAdmins             bool   `json:"add_admins,omitempty"`
+	Anonymous             bool   `json:"anonymous,omitempty"`
+	ManageCall            bool   `json:"manage_call,omitempty"`
+	Other                 bool   `json:"other,omitempty"`
+	ManageTopics          bool   `json:"manage_topics,omitempty"`
+	PostStories           bool   `json:"post_stories,omitempty"`
+	EditStories           bool   `json:"edit_stories,omitempty"`
+	DeleteStories         bool   `json:"delete_stories,omitempty"`
+	ManageDirectMessages  bool   `json:"manage_direct_messages,omitempty"`
+	ManageRanks           bool   `json:"manage_ranks,omitempty"`
+	ManageLinkedPeers     bool   `json:"manage_linked_peers,omitempty"`
+	ManageWelcomeMessages bool   `json:"manage_welcome_messages,omitempty"`
 }
 
 // SetFlags computes flags from non-zero optional fields.
@@ -9631,6 +9632,9 @@ func (v *ChatAdminRights) SetFlags() {
 	if v.ManageLinkedPeers {
 		v.Flags.Set(19)
 	}
+	if v.ManageWelcomeMessages {
+		v.Flags.Set(20)
+	}
 }
 
 // ConstructorID returns the TL constructor identifier 0x5fb224d5.
@@ -9672,6 +9676,7 @@ func DecodeChatAdminRights(r *Reader) (*ChatAdminRights, error) {
 	v.ManageDirectMessages = v.Flags.Has(17)
 	v.ManageRanks = v.Flags.Has(18)
 	v.ManageLinkedPeers = v.Flags.Has(19)
+	v.ManageWelcomeMessages = v.Flags.Has(20)
 	return v, nil
 }
 

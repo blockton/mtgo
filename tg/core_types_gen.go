@@ -3240,7 +3240,7 @@ const ReplyKeyboardForceReplyTypeID = 0x86b40b08
 const ReplyKeyboardMarkupTypeID = 0x85dd99d1
 
 // ReplyInlineMarkupTypeID is the constructor ID for TL type replyInlineMarkup.
-const ReplyInlineMarkupTypeID = 0x48a30254
+const ReplyInlineMarkupTypeID = 0xb2b15770
 
 // isReplyMarkup marks ReplyKeyboardHide as implementing the ReplyMarkupClass interface.
 func (*ReplyKeyboardHide) isReplyMarkup() {}
@@ -3374,6 +3374,7 @@ type ReplyKeyboardMarkup struct {
 	SingleUse   bool                 `json:"single_use,omitempty"`
 	Selective   bool                 `json:"selective,omitempty"`
 	Persistent  bool                 `json:"persistent,omitempty"`
+	ForceReply  bool                 `json:"force_reply,omitempty"`
 	Rows        []*KeyboardButtonRow `json:"rows,omitempty"`
 	Placeholder string               `json:"placeholder,omitempty"`
 }
@@ -3391,6 +3392,9 @@ func (v *ReplyKeyboardMarkup) SetFlags() {
 	}
 	if v.Persistent {
 		v.Flags.Set(4)
+	}
+	if v.ForceReply {
+		v.Flags.Set(5)
 	}
 	if v.Placeholder != "" {
 		v.Flags.Set(3)
@@ -3430,6 +3434,7 @@ func DecodeReplyKeyboardMarkup(r *Reader) (*ReplyKeyboardMarkup, error) {
 	v.SingleUse = v.Flags.Has(1)
 	v.Selective = v.Flags.Has(2)
 	v.Persistent = v.Flags.Has(4)
+	v.ForceReply = v.Flags.Has(5)
 	_vhdrRows, _ehdrRows := r.ReadUint32()
 	if _ehdrRows != nil {
 		return nil, _ehdrRows
@@ -3472,14 +3477,23 @@ func init() {
 	}
 }
 
-// ReplyInlineMarkup represents the TL constructor replyInlineMarkup (0x48a30254).
+// ReplyInlineMarkup represents the TL constructor replyInlineMarkup (0xb2b15770).
 //
 // See https://core.telegram.org/constructor/replyInlineMarkup for reference.
 type ReplyInlineMarkup struct {
-	Rows []*KeyboardButtonRow `json:"rows,omitempty"`
+	Flags      Fields                     `json:"-"`
+	ForceReply bool                       `json:"force_reply,omitempty"`
+	Rows       []*KeyboardInlineButtonRow `json:"rows,omitempty"`
 }
 
-// ConstructorID returns the TL constructor identifier 0x48a30254.
+// SetFlags computes flags from non-zero optional fields.
+func (v *ReplyInlineMarkup) SetFlags() {
+	if v.ForceReply {
+		v.Flags.Set(5)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0xb2b15770.
 func (v *ReplyInlineMarkup) ConstructorID() uint32 {
 	return ReplyInlineMarkupTypeID
 }
@@ -3487,6 +3501,8 @@ func (v *ReplyInlineMarkup) ConstructorID() uint32 {
 // Encode serializes ReplyInlineMarkup to a bytes.Buffer using the TL binary protocol.
 func (v *ReplyInlineMarkup) Encode(b *bytes.Buffer) error {
 	WriteInt(b, ReplyInlineMarkupTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
 	WriteInt(b, 0x1cb5c415)
 	WriteInt(b, uint32(len(v.Rows)))
 	for _, _item := range v.Rows {
@@ -3498,6 +3514,12 @@ func (v *ReplyInlineMarkup) Encode(b *bytes.Buffer) error {
 // DecodeReplyInlineMarkup deserializes a ReplyInlineMarkup from a reader using the TL binary protocol.
 func DecodeReplyInlineMarkup(r *Reader) (*ReplyInlineMarkup, error) {
 	v := &ReplyInlineMarkup{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.ForceReply = v.Flags.Has(5)
 	_vhdrRows, _ehdrRows := r.ReadUint32()
 	if _ehdrRows != nil {
 		return nil, _ehdrRows
@@ -3512,13 +3534,13 @@ func DecodeReplyInlineMarkup(r *Reader) (*ReplyInlineMarkup, error) {
 	if _errRows := checkVectorCount(_cntRows); _errRows != nil {
 		return nil, _errRows
 	}
-	v.Rows = make([]*KeyboardButtonRow, _cntRows)
+	v.Rows = make([]*KeyboardInlineButtonRow, _cntRows)
 	for _iRows := range v.Rows {
 		_objRows, _errRows := ReadTLObject(r)
 		if _errRows != nil {
 			return nil, _errRows
 		}
-		_cRows, _okRows := _objRows.(*KeyboardButtonRow)
+		_cRows, _okRows := _objRows.(*KeyboardInlineButtonRow)
 		if !_okRows {
 			return nil, fmt.Errorf("decode: field rows: unexpected type %T", _objRows)
 		}
@@ -11796,6 +11818,463 @@ func DecodeInputRichFileDocument(r *Reader) (*InputRichFileDocument, error) {
 func init() {
 	Registry[InputRichFileDocumentTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeInputRichFileDocument(r)
+	}
+}
+
+// ButtonTypeClass is the interface for TL type ButtonType.
+// Implementations must satisfy TLObject and are used to represent
+// any constructor of the ButtonType TL type.
+type ButtonTypeClass interface {
+	TLObject
+	isButtonType()
+}
+
+// ButtonTypeDefaultTypeID is the constructor ID for TL type buttonTypeDefault.
+const ButtonTypeDefaultTypeID = 0xc9dd90e9
+
+// ButtonTypeRequestPhoneTypeID is the constructor ID for TL type buttonTypeRequestPhone.
+const ButtonTypeRequestPhoneTypeID = 0xdf3d36f9
+
+// ButtonTypeRequestGeoLocationTypeID is the constructor ID for TL type buttonTypeRequestGeoLocation.
+const ButtonTypeRequestGeoLocationTypeID = 0x9beee140
+
+// ButtonTypeRequestPollTypeID is the constructor ID for TL type buttonTypeRequestPoll.
+const ButtonTypeRequestPollTypeID = 0xaacfff84
+
+// ButtonTypeRequestPeerTypeID is the constructor ID for TL type buttonTypeRequestPeer.
+const ButtonTypeRequestPeerTypeID = 0x4f58a237
+
+// InputButtonTypeRequestPeerTypeID is the constructor ID for TL type inputButtonTypeRequestPeer.
+const InputButtonTypeRequestPeerTypeID = 0x3fe268fe
+
+// ButtonTypeSimpleWebViewTypeID is the constructor ID for TL type buttonTypeSimpleWebView.
+const ButtonTypeSimpleWebViewTypeID = 0xc01a597a
+
+// isButtonType marks ButtonTypeDefault as implementing the ButtonTypeClass interface.
+func (*ButtonTypeDefault) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestPhone as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestPhone) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestGeoLocation as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestGeoLocation) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestPoll as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestPoll) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestPeer as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestPeer) isButtonType() {}
+
+// isButtonType marks InputButtonTypeRequestPeer as implementing the ButtonTypeClass interface.
+func (*InputButtonTypeRequestPeer) isButtonType() {}
+
+// isButtonType marks ButtonTypeSimpleWebView as implementing the ButtonTypeClass interface.
+func (*ButtonTypeSimpleWebView) isButtonType() {}
+
+// ButtonTypeDefault represents the TL constructor buttonTypeDefault (0xc9dd90e9).
+//
+// See https://core.telegram.org/constructor/buttonTypeDefault for reference.
+type ButtonTypeDefault struct {
+}
+
+// ConstructorID returns the TL constructor identifier 0xc9dd90e9.
+func (v *ButtonTypeDefault) ConstructorID() uint32 {
+	return ButtonTypeDefaultTypeID
+}
+
+// Encode serializes ButtonTypeDefault to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeDefault) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeDefaultTypeID)
+	return nil
+}
+
+// DecodeButtonTypeDefault deserializes a ButtonTypeDefault from a reader using the TL binary protocol.
+func DecodeButtonTypeDefault(r *Reader) (*ButtonTypeDefault, error) {
+	v := &ButtonTypeDefault{}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeDefaultTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeDefault(r)
+	}
+}
+
+// ButtonTypeRequestPhone represents the TL constructor buttonTypeRequestPhone (0xdf3d36f9).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestPhone for reference.
+type ButtonTypeRequestPhone struct {
+}
+
+// ConstructorID returns the TL constructor identifier 0xdf3d36f9.
+func (v *ButtonTypeRequestPhone) ConstructorID() uint32 {
+	return ButtonTypeRequestPhoneTypeID
+}
+
+// Encode serializes ButtonTypeRequestPhone to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestPhone) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestPhoneTypeID)
+	return nil
+}
+
+// DecodeButtonTypeRequestPhone deserializes a ButtonTypeRequestPhone from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestPhone(r *Reader) (*ButtonTypeRequestPhone, error) {
+	v := &ButtonTypeRequestPhone{}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestPhoneTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestPhone(r)
+	}
+}
+
+// ButtonTypeRequestGeoLocation represents the TL constructor buttonTypeRequestGeoLocation (0x9beee140).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestGeoLocation for reference.
+type ButtonTypeRequestGeoLocation struct {
+}
+
+// ConstructorID returns the TL constructor identifier 0x9beee140.
+func (v *ButtonTypeRequestGeoLocation) ConstructorID() uint32 {
+	return ButtonTypeRequestGeoLocationTypeID
+}
+
+// Encode serializes ButtonTypeRequestGeoLocation to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestGeoLocation) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestGeoLocationTypeID)
+	return nil
+}
+
+// DecodeButtonTypeRequestGeoLocation deserializes a ButtonTypeRequestGeoLocation from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestGeoLocation(r *Reader) (*ButtonTypeRequestGeoLocation, error) {
+	v := &ButtonTypeRequestGeoLocation{}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestGeoLocationTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestGeoLocation(r)
+	}
+}
+
+// ButtonTypeRequestPoll represents the TL constructor buttonTypeRequestPoll (0xaacfff84).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestPoll for reference.
+type ButtonTypeRequestPoll struct {
+	Flags Fields `json:"-"`
+	Quiz  bool   `json:"quiz,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *ButtonTypeRequestPoll) SetFlags() {
+	if v.Quiz {
+		v.Flags.Set(0)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0xaacfff84.
+func (v *ButtonTypeRequestPoll) ConstructorID() uint32 {
+	return ButtonTypeRequestPollTypeID
+}
+
+// Encode serializes ButtonTypeRequestPoll to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestPoll) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestPollTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	if v.Flags.Has(0) {
+		WriteBool(b, v.Quiz)
+	}
+	return nil
+}
+
+// SetQuiz sets value of Quiz conditional field.
+func (v *ButtonTypeRequestPoll) SetQuiz(value bool) {
+	v.Flags.Set(0)
+	v.Quiz = value
+}
+
+// GetQuiz returns value of Quiz conditional field and a boolean
+// that is true if the field was set.
+func (v *ButtonTypeRequestPoll) GetQuiz() (value bool, ok bool) {
+	if v == nil {
+		return
+	}
+	if !v.Flags.Has(0) {
+		return value, false
+	}
+	return v.Quiz, true
+}
+
+// DecodeButtonTypeRequestPoll deserializes a ButtonTypeRequestPoll from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestPoll(r *Reader) (*ButtonTypeRequestPoll, error) {
+	v := &ButtonTypeRequestPoll{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	if v.Flags.Has(0) {
+		_rQuiz, _eQuiz := r.ReadBool()
+		if _eQuiz != nil {
+			return nil, _eQuiz
+		}
+		v.Quiz = _rQuiz
+	}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestPollTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestPoll(r)
+	}
+}
+
+// ButtonTypeRequestPeer represents the TL constructor buttonTypeRequestPeer (0x4f58a237).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestPeer for reference.
+type ButtonTypeRequestPeer struct {
+	Flags       Fields               `json:"-"`
+	ButtonID    int32                `json:"button_id,omitempty"`
+	PeerType    RequestPeerTypeClass `json:"peer_type,omitempty"`
+	MaxQuantity int32                `json:"max_quantity,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *ButtonTypeRequestPeer) SetFlags() {
+}
+
+// ConstructorID returns the TL constructor identifier 0x4f58a237.
+func (v *ButtonTypeRequestPeer) ConstructorID() uint32 {
+	return ButtonTypeRequestPeerTypeID
+}
+
+// Encode serializes ButtonTypeRequestPeer to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestPeer) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestPeerTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteInt(b, uint32(v.ButtonID))
+	EncodeTLObject(b, v.PeerType)
+	WriteInt(b, uint32(v.MaxQuantity))
+	return nil
+}
+
+// DecodeButtonTypeRequestPeer deserializes a ButtonTypeRequestPeer from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestPeer(r *Reader) (*ButtonTypeRequestPeer, error) {
+	v := &ButtonTypeRequestPeer{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	_rButtonID, _eButtonID := r.ReadInt32()
+	if _eButtonID != nil {
+		return nil, _eButtonID
+	}
+	v.ButtonID = _rButtonID
+	_objPeerType, _errPeerType := ReadTLObject(r)
+	if _errPeerType != nil {
+		return nil, _errPeerType
+	}
+	_cPeerType, _okPeerType := _objPeerType.(RequestPeerTypeClass)
+	if !_okPeerType {
+		return nil, fmt.Errorf("decode: field peer_type: unexpected type %T", _objPeerType)
+	}
+	v.PeerType = _cPeerType
+	_rMaxQuantity, _eMaxQuantity := r.ReadInt32()
+	if _eMaxQuantity != nil {
+		return nil, _eMaxQuantity
+	}
+	v.MaxQuantity = _rMaxQuantity
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestPeerTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestPeer(r)
+	}
+}
+
+// InputButtonTypeRequestPeer represents the TL constructor inputButtonTypeRequestPeer (0x3fe268fe).
+//
+// See https://core.telegram.org/constructor/inputButtonTypeRequestPeer for reference.
+type InputButtonTypeRequestPeer struct {
+	Flags             Fields               `json:"-"`
+	NameRequested     bool                 `json:"name_requested,omitempty"`
+	UsernameRequested bool                 `json:"username_requested,omitempty"`
+	PhotoRequested    bool                 `json:"photo_requested,omitempty"`
+	ButtonID          int32                `json:"button_id,omitempty"`
+	PeerType          RequestPeerTypeClass `json:"peer_type,omitempty"`
+	MaxQuantity       int32                `json:"max_quantity,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *InputButtonTypeRequestPeer) SetFlags() {
+	if v.NameRequested {
+		v.Flags.Set(0)
+	}
+	if v.UsernameRequested {
+		v.Flags.Set(1)
+	}
+	if v.PhotoRequested {
+		v.Flags.Set(2)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x3fe268fe.
+func (v *InputButtonTypeRequestPeer) ConstructorID() uint32 {
+	return InputButtonTypeRequestPeerTypeID
+}
+
+// Encode serializes InputButtonTypeRequestPeer to a bytes.Buffer using the TL binary protocol.
+func (v *InputButtonTypeRequestPeer) Encode(b *bytes.Buffer) error {
+	WriteInt(b, InputButtonTypeRequestPeerTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteInt(b, uint32(v.ButtonID))
+	EncodeTLObject(b, v.PeerType)
+	WriteInt(b, uint32(v.MaxQuantity))
+	return nil
+}
+
+// DecodeInputButtonTypeRequestPeer deserializes a InputButtonTypeRequestPeer from a reader using the TL binary protocol.
+func DecodeInputButtonTypeRequestPeer(r *Reader) (*InputButtonTypeRequestPeer, error) {
+	v := &InputButtonTypeRequestPeer{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.NameRequested = v.Flags.Has(0)
+	v.UsernameRequested = v.Flags.Has(1)
+	v.PhotoRequested = v.Flags.Has(2)
+	_rButtonID, _eButtonID := r.ReadInt32()
+	if _eButtonID != nil {
+		return nil, _eButtonID
+	}
+	v.ButtonID = _rButtonID
+	_objPeerType, _errPeerType := ReadTLObject(r)
+	if _errPeerType != nil {
+		return nil, _errPeerType
+	}
+	_cPeerType, _okPeerType := _objPeerType.(RequestPeerTypeClass)
+	if !_okPeerType {
+		return nil, fmt.Errorf("decode: field peer_type: unexpected type %T", _objPeerType)
+	}
+	v.PeerType = _cPeerType
+	_rMaxQuantity, _eMaxQuantity := r.ReadInt32()
+	if _eMaxQuantity != nil {
+		return nil, _eMaxQuantity
+	}
+	v.MaxQuantity = _rMaxQuantity
+	return v, nil
+}
+
+func init() {
+	Registry[InputButtonTypeRequestPeerTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeInputButtonTypeRequestPeer(r)
+	}
+}
+
+// ButtonTypeSimpleWebView represents the TL constructor buttonTypeSimpleWebView (0xc01a597a).
+//
+// See https://core.telegram.org/constructor/buttonTypeSimpleWebView for reference.
+type ButtonTypeSimpleWebView struct {
+	URL string `json:"url,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0xc01a597a.
+func (v *ButtonTypeSimpleWebView) ConstructorID() uint32 {
+	return ButtonTypeSimpleWebViewTypeID
+}
+
+// Encode serializes ButtonTypeSimpleWebView to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeSimpleWebView) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeSimpleWebViewTypeID)
+	WriteString(b, v.URL)
+	return nil
+}
+
+// DecodeButtonTypeSimpleWebView deserializes a ButtonTypeSimpleWebView from a reader using the TL binary protocol.
+func DecodeButtonTypeSimpleWebView(r *Reader) (*ButtonTypeSimpleWebView, error) {
+	v := &ButtonTypeSimpleWebView{}
+	_rURL, _eURL := r.ReadString()
+	if _eURL != nil {
+		return nil, _eURL
+	}
+	v.URL = _rURL
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeSimpleWebViewTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeSimpleWebView(r)
+	}
+}
+
+// RichButtonStyleTypeID is the constructor ID for TL type richButtonStyle.
+const RichButtonStyleTypeID = 0x03c610bd
+
+// RichButtonStyle represents the TL constructor richButtonStyle (0x03c610bd).
+//
+// See https://core.telegram.org/constructor/richButtonStyle for reference.
+type RichButtonStyle struct {
+	Flags     Fields `json:"-"`
+	BgPrimary bool   `json:"bg_primary,omitempty"`
+	BgDanger  bool   `json:"bg_danger,omitempty"`
+	BgSuccess bool   `json:"bg_success,omitempty"`
+	Link      bool   `json:"link,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *RichButtonStyle) SetFlags() {
+	if v.BgPrimary {
+		v.Flags.Set(0)
+	}
+	if v.BgDanger {
+		v.Flags.Set(1)
+	}
+	if v.BgSuccess {
+		v.Flags.Set(2)
+	}
+	if v.Link {
+		v.Flags.Set(3)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x03c610bd.
+func (v *RichButtonStyle) ConstructorID() uint32 {
+	return RichButtonStyleTypeID
+}
+
+// Encode serializes RichButtonStyle to a bytes.Buffer using the TL binary protocol.
+func (v *RichButtonStyle) Encode(b *bytes.Buffer) error {
+	WriteInt(b, RichButtonStyleTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	return nil
+}
+
+// DecodeRichButtonStyle deserializes a RichButtonStyle from a reader using the TL binary protocol.
+func DecodeRichButtonStyle(r *Reader) (*RichButtonStyle, error) {
+	v := &RichButtonStyle{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.BgPrimary = v.Flags.Has(0)
+	v.BgDanger = v.Flags.Has(1)
+	v.BgSuccess = v.Flags.Has(2)
+	v.Link = v.Flags.Has(3)
+	return v, nil
+}
+
+func init() {
+	Registry[RichButtonStyleTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeRichButtonStyle(r)
 	}
 }
 

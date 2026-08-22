@@ -13,13 +13,13 @@ import (
 //	    []params.KeyboardButton{params.ButtonCB("Yes", "yes"), params.ButtonCB("No", "no")},
 //	)
 func InlineKeyboard(rows ...[]KeyboardButton) tl.ReplyMarkupClass {
-	tlRows := make([]*tl.KeyboardButtonRow, len(rows))
+	tlRows := make([]*tl.KeyboardInlineButtonRow, len(rows))
 	for i, row := range rows {
-		buttons := make([]tl.KeyboardButtonClass, len(row))
+		buttons := make([]*tl.KeyboardInlineButton, len(row))
 		for j, b := range row {
 			buttons[j] = b.toInlineTL()
 		}
-		tlRows[i] = &tl.KeyboardButtonRow{Buttons: buttons}
+		tlRows[i] = &tl.KeyboardInlineButtonRow{Buttons: buttons}
 	}
 	return &tl.ReplyInlineMarkup{Rows: tlRows}
 }
@@ -36,9 +36,9 @@ func InlineKeyboard(rows ...[]KeyboardButton) tl.ReplyMarkupClass {
 func ReplyKeyboard(rows ...[]KeyboardButton) tl.ReplyMarkupClass {
 	tlRows := make([]*tl.KeyboardButtonRow, len(rows))
 	for i, row := range rows {
-		buttons := make([]tl.KeyboardButtonClass, len(row))
+		buttons := make([]*tl.KeyboardButton, len(row))
 		for j, b := range row {
-			buttons[j] = &tl.KeyboardButton{Text: b.Text}
+			buttons[j] = &tl.KeyboardButton{Text: b.Text, Type: &tl.ButtonTypeDefault{}}
 		}
 		tlRows[i] = &tl.KeyboardButtonRow{Buttons: buttons}
 	}
@@ -81,23 +81,23 @@ type KeyboardButton struct {
 	Pay    bool
 }
 
-func (b KeyboardButton) toInlineTL() tl.KeyboardButtonClass {
+func (b KeyboardButton) toInlineTL() *tl.KeyboardInlineButton {
 	if b.URL != "" {
-		return &tl.KeyboardButtonURL{Text: b.Text, URL: b.URL}
+		return &tl.KeyboardInlineButton{Text: b.Text, Type: &tl.InlineButtonTypeURL{URL: b.URL}}
 	}
 	if len(b.Data) > 0 {
-		return &tl.KeyboardButtonCallback{Text: b.Text, Data: b.Data}
+		return &tl.KeyboardInlineButton{Text: b.Text, Type: &tl.InlineButtonTypeCallback{Data: b.Data}}
 	}
 	if b.Switch != "" {
-		return &tl.KeyboardButtonSwitchInline{Text: b.Text, Query: b.Switch}
+		return &tl.KeyboardInlineButton{Text: b.Text, Type: &tl.InlineButtonTypeSwitchInline{Query: b.Switch}}
 	}
 	if b.Game {
-		return &tl.KeyboardButtonGame{Text: b.Text}
+		return &tl.KeyboardInlineButton{Text: b.Text, Type: &tl.InlineButtonTypeGame{}}
 	}
 	if b.Pay {
-		return &tl.KeyboardButtonBuy{Text: b.Text}
+		return &tl.KeyboardInlineButton{Text: b.Text, Type: &tl.InlineButtonTypeBuy{}}
 	}
-	return &tl.KeyboardButton{Text: b.Text}
+	return &tl.KeyboardInlineButton{Text: b.Text, Type: &tl.InlineButtonTypeDisabled{}}
 }
 
 // Button creates a plain text keyboard button.

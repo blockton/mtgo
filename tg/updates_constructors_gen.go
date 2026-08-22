@@ -167,6 +167,7 @@ var ConstructorMapUpdates = map[uint32]func() TLObject{
 	0x20bcbba1: func() TLObject { return &UpdateNewEphemeralMessage{} },
 	0x56dbfcf8: func() TLObject { return &UpdateDeleteEphemeralMessages{} },
 	0x4bbb8f01: func() TLObject { return &UpdateEditEphemeralMessage{} },
+	0x7c1079d6: func() TLObject { return &UpdateEphemeralBotCallbackQuery{} },
 	0x6c0d8e23: func() TLObject { return &UpdateBotStarsSubscription{} },
 	0xa56c2a3e: func() TLObject { return &UpdatesState{} },
 	0x5d75a138: func() TLObject { return &UpdatesDifferenceEmpty{} },

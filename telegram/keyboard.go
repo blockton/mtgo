@@ -24,20 +24,36 @@ import (
 //	    Text("Option B").
 //	    BuildReply(telegram.ReplyOpts{Resize: true, OneTime: true})
 type KeyboardBuilder struct {
-	rows [][]tg.KeyboardButtonClass
-	row  []tg.KeyboardButtonClass
+	rows [][]builtButton
+	row  []builtButton
+}
+
+// builtButton holds one button in its wire form. Inline-button methods fill
+// the inline form, reply-button methods the reply form; the missing form is
+// derived at build time because layer 229 splits the two button kinds into
+// separate constructor hierarchies (keyboardButton#ButtonType vs
+// keyboardInlineButton#InlineButtonType).
+type builtButton struct {
+	text   string
+	inline *tg.KeyboardInlineButton
+	reply  *tg.KeyboardButton
 }
 
 // Keyboard returns a new keyboard builder.
 func Keyboard() *KeyboardBuilder {
 	return &KeyboardBuilder{
-		rows: make([][]tg.KeyboardButtonClass, 0, 4),
-		row:  make([]tg.KeyboardButtonClass, 0, 6),
+		rows: make([][]builtButton, 0, 4),
+		row:  make([]builtButton, 0, 6),
 	}
 }
 
-func (b *KeyboardBuilder) add(btn tg.KeyboardButtonClass) *KeyboardBuilder {
-	b.row = append(b.row, btn)
+func (b *KeyboardBuilder) addInline(btn *tg.KeyboardInlineButton) *KeyboardBuilder {
+	b.row = append(b.row, builtButton{text: btn.Text, inline: btn})
+	return b
+}
+
+func (b *KeyboardBuilder) addReply(btn *tg.KeyboardButton) *KeyboardBuilder {
+	b.row = append(b.row, builtButton{text: btn.Text, reply: btn})
 	return b
 }
 
@@ -45,15 +61,31 @@ func (b *KeyboardBuilder) add(btn tg.KeyboardButtonClass) *KeyboardBuilder {
 func (b *KeyboardBuilder) Next() *KeyboardBuilder {
 	if len(b.row) > 0 {
 		b.rows = append(b.rows, b.row)
-		b.row = make([]tg.KeyboardButtonClass, 0, cap(b.row))
+		b.row = make([]builtButton, 0, cap(b.row))
 	}
 	return b
 }
 
-// Row appends a pre-built row of buttons.
-func (b *KeyboardBuilder) Row(buttons ...tg.KeyboardButtonClass) *KeyboardBuilder {
+// InlineRow appends a pre-built row of inline buttons.
+func (b *KeyboardBuilder) InlineRow(buttons ...*tg.KeyboardInlineButton) *KeyboardBuilder {
 	if len(buttons) > 0 {
-		b.rows = append(b.rows, buttons)
+		row := make([]builtButton, len(buttons))
+		for i, btn := range buttons {
+			row[i] = builtButton{text: btn.Text, inline: btn}
+		}
+		b.rows = append(b.rows, row)
+	}
+	return b
+}
+
+// ReplyRow appends a pre-built row of reply-keyboard buttons.
+func (b *KeyboardBuilder) ReplyRow(buttons ...*tg.KeyboardButton) *KeyboardBuilder {
+	if len(buttons) > 0 {
+		row := make([]builtButton, len(buttons))
+		for i, btn := range buttons {
+			row[i] = builtButton{text: btn.Text, reply: btn}
+		}
+		b.rows = append(b.rows, row)
 	}
 	return b
 }
@@ -68,38 +100,41 @@ func (b *KeyboardBuilder) Callback(text, data string) *KeyboardBuilder {
 	if len(d) > 64 {
 		d = d[:64]
 	}
-	return b.add(&tg.KeyboardButtonCallback{Text: text, Data: d})
+	return b.addInline(&tg.KeyboardInlineButton{Text: text, Type: &tg.InlineButtonTypeCallback{Data: d}})
 }
 
 // URL adds a button that opens url when tapped.
 func (b *KeyboardBuilder) URL(text, url string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonURL{Text: text, URL: url})
+	return b.addInline(&tg.KeyboardInlineButton{Text: text, Type: &tg.InlineButtonTypeURL{URL: url}})
 }
 
 // Switch adds a button that switches the user to inline mode.
 // samePeer=true sends the query in the current chat; false lets the user pick.
 func (b *KeyboardBuilder) Switch(text string, samePeer bool, query string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonSwitchInline{Text: text, Query: query, SamePeer: samePeer})
+	return b.addInline(&tg.KeyboardInlineButton{
+		Text: text,
+		Type: &tg.InlineButtonTypeSwitchInline{Query: query, SamePeer: samePeer},
+	})
 }
 
 // Copy adds a button that copies copyText to the user's clipboard.
 func (b *KeyboardBuilder) Copy(text, copyText string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonCopy{Text: text, CopyText: copyText})
+	return b.addInline(&tg.KeyboardInlineButton{Text: text, Type: &tg.InlineButtonTypeCopy{CopyText: copyText}})
 }
 
 // Game adds an HTML5 game button.
 func (b *KeyboardBuilder) Game(text string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonGame{Text: text})
+	return b.addInline(&tg.KeyboardInlineButton{Text: text, Type: &tg.InlineButtonTypeGame{}})
 }
 
 // Buy adds a payment button.
 func (b *KeyboardBuilder) Buy(text string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonBuy{Text: text})
+	return b.addInline(&tg.KeyboardInlineButton{Text: text, Type: &tg.InlineButtonTypeBuy{}})
 }
 
 // WebApp adds a button that opens a Telegram Mini App.
 func (b *KeyboardBuilder) WebApp(text, url string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonWebView{Text: text, URL: url})
+	return b.addInline(&tg.KeyboardInlineButton{Text: text, Type: &tg.InlineButtonTypeWebView{URL: url}})
 }
 
 // ---------------------------------------------------------------------------
@@ -108,12 +143,12 @@ func (b *KeyboardBuilder) WebApp(text, url string) *KeyboardBuilder {
 
 // Text adds a text button (sends its text as a message when tapped).
 func (b *KeyboardBuilder) Text(text string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButton{Text: text})
+	return b.addReply(&tg.KeyboardButton{Text: text, Type: &tg.ButtonTypeDefault{}})
 }
 
 // RequestPhone adds a button that requests the user's phone number.
 func (b *KeyboardBuilder) RequestPhone(text string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonRequestPhone{Text: text})
+	return b.addReply(&tg.KeyboardButton{Text: text, Type: &tg.ButtonTypeRequestPhone{}})
 }
 
 // RequestPeer adds a button that lets the user share a chat, channel, or user.
@@ -142,11 +177,13 @@ type PeerChannelOpts struct {
 }
 
 func (b *KeyboardBuilder) RequestPeer(text string, buttonID int32, peerType tg.RequestPeerTypeClass, maxQuantity int32) *KeyboardBuilder {
-	return b.add(&tg.InputKeyboardButtonRequestPeer{
-		Text:        text,
-		ButtonID:    buttonID,
-		PeerType:    peerType,
-		MaxQuantity: maxQuantity,
+	return b.addReply(&tg.KeyboardButton{
+		Text: text,
+		Type: &tg.InputButtonTypeRequestPeer{
+			ButtonID:    buttonID,
+			PeerType:    peerType,
+			MaxQuantity: maxQuantity,
+		},
 	})
 }
 
@@ -178,14 +215,15 @@ func (b *KeyboardBuilder) RequestChannel(text string, buttonID int32, opts ...Pe
 
 // RequestGeo adds a button that requests the user's location.
 func (b *KeyboardBuilder) RequestGeo(text string) *KeyboardBuilder {
-	return b.add(&tg.KeyboardButtonRequestGeoLocation{Text: text})
+	return b.addReply(&tg.KeyboardButton{Text: text, Type: &tg.ButtonTypeRequestGeoLocation{}})
 }
 
 // RequestPoll adds a button that prompts the user to create a poll or quiz.
 func (b *KeyboardBuilder) RequestPoll(text string, quiz bool) *KeyboardBuilder {
-	btn := &tg.KeyboardButtonRequestPoll{Text: text, Quiz: quiz}
-	btn.Flags.Set(0)
-	return b.add(btn)
+	t := &tg.ButtonTypeRequestPoll{Quiz: quiz}
+	// Always set the flag so quiz=false serializes as an explicit boolFalse.
+	t.Flags.Set(0)
+	return b.addReply(&tg.KeyboardButton{Text: text, Type: t})
 }
 
 // ---------------------------------------------------------------------------
@@ -211,93 +249,32 @@ func danger(s *tg.KeyboardButtonStyle)  { s.BgDanger = true }
 func success(s *tg.KeyboardButtonStyle) { s.BgSuccess = true }
 
 // applyStyle modifies the Style field of the last button in the current row.
-// No-op if the row is empty or the button doesn't support styling.
+// No-op if the row is empty.
 func (b *KeyboardBuilder) applyStyle(fn func(*tg.KeyboardButtonStyle)) *KeyboardBuilder {
 	if len(b.row) == 0 {
 		return b
 	}
-	btn := b.row[len(b.row)-1]
-	if s := styleOf(btn); s != nil {
+	if s := b.row[len(b.row)-1].style(); s != nil {
 		fn(s)
 	}
 	return b
 }
 
-// styleOf returns a pointer to the button's Style field, or nil if unsupported.
-func styleOf(btn tg.KeyboardButtonClass) *tg.KeyboardButtonStyle {
-	switch b := btn.(type) {
-	case *tg.KeyboardButton:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonURL:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonCallback:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonRequestPhone:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonRequestGeoLocation:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonSwitchInline:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonGame:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonBuy:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonURLAuth:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonRequestPoll:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonUserProfile:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonWebView:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonSimpleWebView:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
-	case *tg.KeyboardButtonCopy:
-		if b.Style == nil {
-			b.Style = &tg.KeyboardButtonStyle{}
-		}
-		return b.Style
+// style returns a pointer to the button's Style field, lazily creating it.
+func (bb *builtButton) style() *tg.KeyboardButtonStyle {
+	var p **tg.KeyboardButtonStyle
+	switch {
+	case bb.inline != nil:
+		p = &bb.inline.Style
+	case bb.reply != nil:
+		p = &bb.reply.Style
+	default:
+		return nil
 	}
-	return nil
+	if *p == nil {
+		*p = &tg.KeyboardButtonStyle{}
+	}
+	return *p
 }
 
 // ---------------------------------------------------------------------------
@@ -313,33 +290,55 @@ type ReplyOpts struct {
 	Placeholder string // Hint text in the input field. Empty = default.
 }
 
-// buildRows finalizes the current row and returns all accumulated rows, or nil.
-func (b *KeyboardBuilder) buildRows() []*tg.KeyboardButtonRow {
+// finalize closes the current row and returns all accumulated rows, or nil.
+func (b *KeyboardBuilder) finalize() [][]builtButton {
 	b.Next()
 	if len(b.rows) == 0 {
 		return nil
 	}
-	out := make([]*tg.KeyboardButtonRow, len(b.rows))
-	for i, row := range b.rows {
-		out[i] = &tg.KeyboardButtonRow{Buttons: row}
+	return b.rows
+}
+
+// toInline returns the inline wire form of the button. Reply-only buttons
+// degrade to a disabled text button (layer 229 has no plain inline button).
+func (bb builtButton) toInline() *tg.KeyboardInlineButton {
+	if bb.inline != nil {
+		return bb.inline
 	}
-	return out
+	return &tg.KeyboardInlineButton{Text: bb.text, Type: &tg.InlineButtonTypeDisabled{}}
+}
+
+// toReply returns the reply-keyboard wire form of the button. Inline-only
+// buttons degrade to a plain text button.
+func (bb builtButton) toReply() *tg.KeyboardButton {
+	if bb.reply != nil {
+		return bb.reply
+	}
+	return &tg.KeyboardButton{Text: bb.text, Type: &tg.ButtonTypeDefault{}}
 }
 
 // Build produces an inline keyboard (tg.ReplyInlineMarkup).
 // Returns nil if no buttons were added.
 func (b *KeyboardBuilder) Build() tg.ReplyMarkupClass {
-	rows := b.buildRows()
+	rows := b.finalize()
 	if rows == nil {
 		return nil
 	}
-	return &tg.ReplyInlineMarkup{Rows: rows}
+	out := make([]*tg.KeyboardInlineButtonRow, len(rows))
+	for i, row := range rows {
+		buttons := make([]*tg.KeyboardInlineButton, len(row))
+		for j, bb := range row {
+			buttons[j] = bb.toInline()
+		}
+		out[i] = &tg.KeyboardInlineButtonRow{Buttons: buttons}
+	}
+	return &tg.ReplyInlineMarkup{Rows: out}
 }
 
 // BuildReply produces a reply keyboard (tg.ReplyKeyboardMarkup).
 // Returns nil if no buttons were added.
 func (b *KeyboardBuilder) BuildReply(opts ...ReplyOpts) tg.ReplyMarkupClass {
-	rows := b.buildRows()
+	rows := b.finalize()
 	if rows == nil {
 		return nil
 	}
@@ -349,8 +348,17 @@ func (b *KeyboardBuilder) BuildReply(opts ...ReplyOpts) tg.ReplyMarkupClass {
 		o = opts[0]
 	}
 
+	out := make([]*tg.KeyboardButtonRow, len(rows))
+	for i, row := range rows {
+		buttons := make([]*tg.KeyboardButton, len(row))
+		for j, bb := range row {
+			buttons[j] = bb.toReply()
+		}
+		out[i] = &tg.KeyboardButtonRow{Buttons: buttons}
+	}
+
 	m := &tg.ReplyKeyboardMarkup{
-		Rows:       rows,
+		Rows:       out,
 		Resize:     o.Resize,
 		SingleUse:  o.OneTime,
 		Selective:  o.Selective,

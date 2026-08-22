@@ -2823,6 +2823,52 @@ func init() {
 	}
 }
 
+// AuthFirebasePnvIntentTypeID is the constructor ID for TL type auth.firebasePnvIntent.
+const AuthFirebasePnvIntentTypeID = 0xdf5ac00c
+
+// AuthFirebasePnvIntent represents the TL constructor auth.firebasePnvIntent (0xdf5ac00c).
+//
+// See https://core.telegram.org/constructor/auth.firebasePnvIntent for reference.
+type AuthFirebasePnvIntent struct {
+	Nonce                    string `json:"nonce,omitempty"`
+	DigitalCredentialPayload string `json:"digital_credential_payload,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0xdf5ac00c.
+func (v *AuthFirebasePnvIntent) ConstructorID() uint32 {
+	return AuthFirebasePnvIntentTypeID
+}
+
+// Encode serializes AuthFirebasePnvIntent to a bytes.Buffer using the TL binary protocol.
+func (v *AuthFirebasePnvIntent) Encode(b *bytes.Buffer) error {
+	WriteInt(b, AuthFirebasePnvIntentTypeID)
+	WriteString(b, v.Nonce)
+	WriteString(b, v.DigitalCredentialPayload)
+	return nil
+}
+
+// DecodeAuthFirebasePnvIntent deserializes a AuthFirebasePnvIntent from a reader using the TL binary protocol.
+func DecodeAuthFirebasePnvIntent(r *Reader) (*AuthFirebasePnvIntent, error) {
+	v := &AuthFirebasePnvIntent{}
+	_rNonce, _eNonce := r.ReadString()
+	if _eNonce != nil {
+		return nil, _eNonce
+	}
+	v.Nonce = _rNonce
+	_rDigitalCredentialPayload, _eDigitalCredentialPayload := r.ReadString()
+	if _eDigitalCredentialPayload != nil {
+		return nil, _eDigitalCredentialPayload
+	}
+	v.DigitalCredentialPayload = _rDigitalCredentialPayload
+	return v, nil
+}
+
+func init() {
+	Registry[AuthFirebasePnvIntentTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeAuthFirebasePnvIntent(r)
+	}
+}
+
 // BindAuthKeyInnerTypeID is the constructor ID for TL type bind_auth_key_inner.
 const BindAuthKeyInnerTypeID = 0x75a3f765
 

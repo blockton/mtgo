@@ -882,6 +882,7 @@ type MessagesForwardMessagesRequest struct {
 	DropMediaCaptions    bool                         `json:"drop_media_captions,omitempty"`
 	Noforwards           bool                         `json:"noforwards,omitempty"`
 	AllowPaidFloodskip   bool                         `json:"allow_paid_floodskip,omitempty"`
+	FromEphemeral        bool                         `json:"from_ephemeral,omitempty"`
 	FromPeer             InputPeerClass               `json:"from_peer,omitempty"`
 	ID                   []int32                      `json:"id,omitempty"`
 	RandomID             []int64                      `json:"random_id,omitempty"`
@@ -920,6 +921,9 @@ func (v *MessagesForwardMessagesRequest) SetFlags() {
 	}
 	if v.AllowPaidFloodskip {
 		v.Flags.Set(19)
+	}
+	if v.FromEphemeral {
+		v.Flags.Set(25)
 	}
 	if v.TopMsgID != 0 {
 		v.Flags.Set(9)

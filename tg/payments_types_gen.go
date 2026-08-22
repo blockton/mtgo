@@ -1957,7 +1957,7 @@ const InputInvoicePremiumGiftStarsTypeID = 0xdabab2ef
 const InputInvoiceBusinessBotTransferStarsTypeID = 0xf4997e42
 
 // InputInvoiceStarGiftResaleTypeID is the constructor ID for TL type inputInvoiceStarGiftResale.
-const InputInvoiceStarGiftResaleTypeID = 0xc39f5324
+const InputInvoiceStarGiftResaleTypeID = 0xe9b0c658
 
 // InputInvoiceStarGiftPrepaidUpgradeTypeID is the constructor ID for TL type inputInvoiceStarGiftPrepaidUpgrade.
 const InputInvoiceStarGiftPrepaidUpgradeTypeID = 0x9a0b48b8
@@ -2545,14 +2545,16 @@ func init() {
 	}
 }
 
-// InputInvoiceStarGiftResale represents the TL constructor inputInvoiceStarGiftResale (0xc39f5324).
+// InputInvoiceStarGiftResale represents the TL constructor inputInvoiceStarGiftResale (0xe9b0c658).
 //
 // See https://core.telegram.org/constructor/inputInvoiceStarGiftResale for reference.
 type InputInvoiceStarGiftResale struct {
-	Flags Fields         `json:"-"`
-	Ton   bool           `json:"ton,omitempty"`
-	Slug  string         `json:"slug,omitempty"`
-	ToID  InputPeerClass `json:"to_id,omitempty"`
+	Flags    Fields            `json:"-"`
+	Ton      bool              `json:"ton,omitempty"`
+	ShowName bool              `json:"show_name,omitempty"`
+	Slug     string            `json:"slug,omitempty"`
+	ToID     InputPeerClass    `json:"to_id,omitempty"`
+	Message  *TextWithEntities `json:"message,omitempty"`
 }
 
 // SetFlags computes flags from non-zero optional fields.
@@ -2560,9 +2562,15 @@ func (v *InputInvoiceStarGiftResale) SetFlags() {
 	if v.Ton {
 		v.Flags.Set(0)
 	}
+	if v.ShowName {
+		v.Flags.Set(2)
+	}
+	if v.Message != nil {
+		v.Flags.Set(1)
+	}
 }
 
-// ConstructorID returns the TL constructor identifier 0xc39f5324.
+// ConstructorID returns the TL constructor identifier 0xe9b0c658.
 func (v *InputInvoiceStarGiftResale) ConstructorID() uint32 {
 	return InputInvoiceStarGiftResaleTypeID
 }
@@ -2574,6 +2582,9 @@ func (v *InputInvoiceStarGiftResale) Encode(b *bytes.Buffer) error {
 	WriteInt(b, uint32(v.Flags))
 	WriteString(b, v.Slug)
 	EncodeTLObject(b, v.ToID)
+	if v.Flags.Has(1) {
+		EncodeTLObject(b, v.Message)
+	}
 	return nil
 }
 
@@ -2586,6 +2597,7 @@ func DecodeInputInvoiceStarGiftResale(r *Reader) (*InputInvoiceStarGiftResale, e
 	}
 	v.Flags = Fields(_rFlags)
 	v.Ton = v.Flags.Has(0)
+	v.ShowName = v.Flags.Has(2)
 	_rSlug, _eSlug := r.ReadString()
 	if _eSlug != nil {
 		return nil, _eSlug
@@ -2600,6 +2612,17 @@ func DecodeInputInvoiceStarGiftResale(r *Reader) (*InputInvoiceStarGiftResale, e
 		return nil, fmt.Errorf("decode: field to_id: unexpected type %T", _objToID)
 	}
 	v.ToID = _cToID
+	if v.Flags.Has(1) {
+		_objMessage, _errMessage := ReadTLObject(r)
+		if _errMessage != nil {
+			return nil, _errMessage
+		}
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
+	}
 	return v, nil
 }
 

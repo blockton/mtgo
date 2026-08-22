@@ -49,6 +49,7 @@ var ConstructorMapAuth = map[uint32]func() TLObject{
 	0xc31fc14a: func() TLObject { return &InputPasskeyResponseLogin{} },
 	0x3c27b78f: func() TLObject { return &InputPasskeyCredentialPublicKey{} },
 	0x5b1ccb28: func() TLObject { return &InputPasskeyCredentialFirebasePnv{} },
+	0xdf5ac00c: func() TLObject { return &AuthFirebasePnvIntent{} },
 	0x75a3f765: func() TLObject { return &BindAuthKeyInner{} },
 	0xf660e1d4: func() TLObject { return &DestroyAuthKeyOk{} },
 	0x0a9f2259: func() TLObject { return &DestroyAuthKeyNone{} },

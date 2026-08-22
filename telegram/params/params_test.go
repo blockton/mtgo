@@ -14,7 +14,7 @@ func makeFlatArgs() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, 
 	return true, true, true, true, true,
 		42,
 		&tl.InputReplyToMessage{ReplyToMsgID: 42},
-		&tl.ReplyKeyboardMarkup{Rows: []*tl.KeyboardButtonRow{{Buttons: []tl.KeyboardButtonClass{&tl.KeyboardButton{Text: "test"}}}}},
+		&tl.ReplyKeyboardMarkup{Rows: []*tl.KeyboardButtonRow{{Buttons: []*tl.KeyboardButton{{Text: "test"}}}}},
 		new(int32(100)),
 		new(int64(200)),
 		&tl.InputPeerUser{UserID: 123, AccessHash: 456},
@@ -207,7 +207,6 @@ func TestFlatToSendMsg_SendSticker(t *testing.T) {
 }
 
 // --- flatToSendMsg parse mode propagation ----------------------------------
-
 
 func TestFlatToSendMsg_ParseModePropagation(t *testing.T) {
 	tests := []struct {
@@ -456,23 +455,25 @@ func TestInlineKeyboardStructure(t *testing.T) {
 		t.Fatalf("expected 2 buttons, got %d", len(buttons))
 	}
 
-	urlBtn, ok := buttons[0].(*tl.KeyboardButtonURL)
+	urlBtn := buttons[0]
+	urlType, ok := urlBtn.Type.(*tl.InlineButtonTypeURL)
 	if !ok {
-		t.Fatalf("button 0: expected *KeyboardButtonURL, got %T", buttons[0])
+		t.Fatalf("button 0: expected *InlineButtonTypeURL, got %T", urlBtn.Type)
 	}
-	if urlBtn.Text != "Open" || urlBtn.URL != "https://example.com" {
-		t.Errorf("URL button: text=%q url=%q", urlBtn.Text, urlBtn.URL)
+	if urlBtn.Text != "Open" || urlType.URL != "https://example.com" {
+		t.Errorf("URL button: text=%q url=%q", urlBtn.Text, urlType.URL)
 	}
 
-	cbBtn, ok := buttons[1].(*tl.KeyboardButtonCallback)
+	cbBtn := buttons[1]
+	cbType, ok := cbBtn.Type.(*tl.InlineButtonTypeCallback)
 	if !ok {
-		t.Fatalf("button 1: expected *KeyboardButtonCallback, got %T", buttons[1])
+		t.Fatalf("button 1: expected *InlineButtonTypeCallback, got %T", cbBtn.Type)
 	}
 	if cbBtn.Text != "Delete" {
 		t.Errorf("callback button text=%q, want Delete", cbBtn.Text)
 	}
-	if string(cbBtn.Data) != "del" {
-		t.Errorf("callback button data=%q, want del", string(cbBtn.Data))
+	if string(cbType.Data) != "del" {
+		t.Errorf("callback button data=%q, want del", string(cbType.Data))
 	}
 }
 
@@ -496,21 +497,21 @@ func TestButtonVariants(t *testing.T) {
 	tests := []struct {
 		name string
 		btn  KeyboardButton
-		want tl.KeyboardButtonClass
+		want tl.InlineButtonTypeClass
 	}{
-		{"plain", Button("Click"), &tl.KeyboardButton{Text: "Click"}},
-		{"url", ButtonURL("Go", "https://x.com"), &tl.KeyboardButtonURL{Text: "Go", URL: "https://x.com"}},
-		{"callback", ButtonCB("OK", "ok"), &tl.KeyboardButtonCallback{Text: "OK", Data: []byte("ok")}},
-		{"switch", ButtonSwitch("Share", "q"), &tl.KeyboardButtonSwitchInline{Text: "Share", Query: "q"}},
-		{"game", ButtonGame("Play"), &tl.KeyboardButtonGame{Text: "Play"}},
-		{"pay", ButtonPay("Buy"), &tl.KeyboardButtonBuy{Text: "Buy"}},
+		{"plain", Button("Click"), &tl.InlineButtonTypeDisabled{}},
+		{"url", ButtonURL("Go", "https://x.com"), &tl.InlineButtonTypeURL{URL: "https://x.com"}},
+		{"callback", ButtonCB("OK", "ok"), &tl.InlineButtonTypeCallback{Data: []byte("ok")}},
+		{"switch", ButtonSwitch("Share", "q"), &tl.InlineButtonTypeSwitchInline{Query: "q"}},
+		{"game", ButtonGame("Play"), &tl.InlineButtonTypeGame{}},
+		{"pay", ButtonPay("Buy"), &tl.InlineButtonTypeBuy{}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.btn.toInlineTL()
-			if got.ConstructorID() != tc.want.ConstructorID() {
-				t.Errorf("constructor: got 0x%x, want 0x%x", got.ConstructorID(), tc.want.ConstructorID())
+			if got.Type.ConstructorID() != tc.want.ConstructorID() {
+				t.Errorf("constructor: got 0x%x, want 0x%x", got.Type.ConstructorID(), tc.want.ConstructorID())
 			}
 		})
 	}
@@ -613,13 +614,9 @@ func TestParseModeString(t *testing.T) {
 
 // --- helpers ---------------------------------------------------------------
 
-func assertButtonText(t *testing.T, btn tl.KeyboardButtonClass, want string) {
+func assertButtonText(t *testing.T, btn *tl.KeyboardButton, want string) {
 	t.Helper()
-	kb, ok := btn.(*tl.KeyboardButton)
-	if !ok {
-		t.Fatalf("expected *KeyboardButton, got %T", btn)
-	}
-	if kb.Text != want {
-		t.Errorf("button text = %q, want %q", kb.Text, want)
+	if btn.Text != want {
+		t.Errorf("button text = %q, want %q", btn.Text, want)
 	}
 }
