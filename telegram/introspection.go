@@ -1,15 +1,9 @@
 package telegram
 
-import (
-	"time"
-)
-
 // LoadSnapshot is a read-only runtime snapshot of client load for operator
 // observability (FR-020). All fields are populated from atomic reads with zero
 // hot-path allocation. Safe for concurrent use.
 type LoadSnapshot struct {
-	InboundQueueDepth int
-	InboundHighWater  int
 	OutboundHighDepth int
 	OutboundLowDepth  int
 	InFlightRPCs      int64
@@ -17,6 +11,7 @@ type LoadSnapshot struct {
 	MessagesPacked    int64
 	ThrottleLevel     ThrottleLevel
 	OverloadActive    bool
+	Connection        ConnectionSnapshot
 }
 
 // LoadSnapshot returns an aggregated view of the client's internal load state.
@@ -26,17 +21,9 @@ func (c *Client) LoadSnapshot() LoadSnapshot {
 	snap := LoadSnapshot{}
 
 	c.mu.RLock()
-	um := c.updateManager
 	sess := c.session
 	oc := c.overloadController
 	c.mu.RUnlock()
-
-	// Inbound queue depth (from update manager's inbound queue).
-	if um != nil && um.cfg.InboundQueue != nil {
-		is := um.cfg.InboundQueue.Snapshot()
-		snap.InboundQueueDepth = is.Depth
-		snap.InboundHighWater = is.HighWater
-	}
 
 	// Outbound batcher metrics (from session).
 	if sess != nil {
@@ -54,9 +41,12 @@ func (c *Client) LoadSnapshot() LoadSnapshot {
 		snap.ThrottleLevel = os.ThrottleLevel
 		snap.OverloadActive = os.OverloadActive
 	}
+	snap.Connection = c.ConnectionSnapshot()
 
 	return snap
 }
 
-// Ensure time import is used for potential future latency fields.
-var _ = time.Second
+// ConnectionSnapshot returns transport and connection lifecycle diagnostics.
+func (c *Client) ConnectionSnapshot() ConnectionSnapshot {
+	return c.connMetrics.Snapshot()
+}

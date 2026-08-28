@@ -4,6 +4,7 @@ package tg
 
 import (
 	"bytes"
+	"fmt"
 )
 
 // UpdateClass is the interface for TL type Update.
@@ -494,6 +495,21 @@ const UpdateWebBrowserSettingsTypeID = 0xc39a2ade
 // UpdateWebBrowserExceptionTypeID is the constructor ID for TL type updateWebBrowserException.
 const UpdateWebBrowserExceptionTypeID = 0x140502d1
 
+// UpdateNewEphemeralMessageTypeID is the constructor ID for TL type updateNewEphemeralMessage.
+const UpdateNewEphemeralMessageTypeID = 0x20bcbba1
+
+// UpdateDeleteEphemeralMessagesTypeID is the constructor ID for TL type updateDeleteEphemeralMessages.
+const UpdateDeleteEphemeralMessagesTypeID = 0x56dbfcf8
+
+// UpdateEditEphemeralMessageTypeID is the constructor ID for TL type updateEditEphemeralMessage.
+const UpdateEditEphemeralMessageTypeID = 0x4bbb8f01
+
+// UpdateEphemeralBotCallbackQueryTypeID is the constructor ID for TL type updateEphemeralBotCallbackQuery.
+const UpdateEphemeralBotCallbackQueryTypeID = 0x7c1079d6
+
+// UpdateBotStarsSubscriptionTypeID is the constructor ID for TL type updateBotStarsSubscription.
+const UpdateBotStarsSubscriptionTypeID = 0x6c0d8e23
+
 // isUpdate marks UpdateNewMessage as implementing the UpdateClass interface.
 func (*UpdateNewMessage) isUpdate() {}
 
@@ -974,6 +990,21 @@ func (*UpdateWebBrowserSettings) isUpdate() {}
 // isUpdate marks UpdateWebBrowserException as implementing the UpdateClass interface.
 func (*UpdateWebBrowserException) isUpdate() {}
 
+// isUpdate marks UpdateNewEphemeralMessage as implementing the UpdateClass interface.
+func (*UpdateNewEphemeralMessage) isUpdate() {}
+
+// isUpdate marks UpdateDeleteEphemeralMessages as implementing the UpdateClass interface.
+func (*UpdateDeleteEphemeralMessages) isUpdate() {}
+
+// isUpdate marks UpdateEditEphemeralMessage as implementing the UpdateClass interface.
+func (*UpdateEditEphemeralMessage) isUpdate() {}
+
+// isUpdate marks UpdateEphemeralBotCallbackQuery as implementing the UpdateClass interface.
+func (*UpdateEphemeralBotCallbackQuery) isUpdate() {}
+
+// isUpdate marks UpdateBotStarsSubscription as implementing the UpdateClass interface.
+func (*UpdateBotStarsSubscription) isUpdate() {}
+
 // UpdateNewMessage represents the TL constructor updateNewMessage (0x1f2b0afd).
 //
 // See https://core.telegram.org/constructor/updateNewMessage for reference.
@@ -1004,7 +1035,11 @@ func DecodeUpdateNewMessage(r *Reader) (*UpdateNewMessage, error) {
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
 		return nil, _ePTS
@@ -1155,11 +1190,11 @@ func (v *UpdateUserTyping) Encode(b *bytes.Buffer) error {
 // DecodeUpdateUserTyping deserializes a UpdateUserTyping from a reader using the TL binary protocol.
 func DecodeUpdateUserTyping(r *Reader) (*UpdateUserTyping, error) {
 	v := &UpdateUserTyping{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rUserID, _eUserID := r.ReadInt64()
 	if _eUserID != nil {
 		return nil, _eUserID
@@ -1176,7 +1211,11 @@ func DecodeUpdateUserTyping(r *Reader) (*UpdateUserTyping, error) {
 	if _errAction != nil {
 		return nil, _errAction
 	}
-	v.Action = _objAction.(SendMessageActionClass)
+	_cAction, _okAction := _objAction.(SendMessageActionClass)
+	if !_okAction {
+		return nil, fmt.Errorf("decode: field action: unexpected type %T", _objAction)
+	}
+	v.Action = _cAction
 	return v, nil
 }
 
@@ -1221,12 +1260,20 @@ func DecodeUpdateChatUserTyping(r *Reader) (*UpdateChatUserTyping, error) {
 	if _errFromID != nil {
 		return nil, _errFromID
 	}
-	v.FromID = _objFromID.(PeerClass)
+	_cFromID, _okFromID := _objFromID.(PeerClass)
+	if !_okFromID {
+		return nil, fmt.Errorf("decode: field from_id: unexpected type %T", _objFromID)
+	}
+	v.FromID = _cFromID
 	_objAction, _errAction := ReadTLObject(r)
 	if _errAction != nil {
 		return nil, _errAction
 	}
-	v.Action = _objAction.(SendMessageActionClass)
+	_cAction, _okAction := _objAction.(SendMessageActionClass)
+	if !_okAction {
+		return nil, fmt.Errorf("decode: field action: unexpected type %T", _objAction)
+	}
+	v.Action = _cAction
 	return v, nil
 }
 
@@ -1262,7 +1309,11 @@ func DecodeUpdateChatParticipants(r *Reader) (*UpdateChatParticipants, error) {
 	if _errParticipants != nil {
 		return nil, _errParticipants
 	}
-	v.Participants = _objParticipants.(ChatParticipantsClass)
+	_cParticipants, _okParticipants := _objParticipants.(ChatParticipantsClass)
+	if !_okParticipants {
+		return nil, fmt.Errorf("decode: field participants: unexpected type %T", _objParticipants)
+	}
+	v.Participants = _cParticipants
 	return v, nil
 }
 
@@ -1305,7 +1356,11 @@ func DecodeUpdateUserStatus(r *Reader) (*UpdateUserStatus, error) {
 	if _errStatus != nil {
 		return nil, _errStatus
 	}
-	v.Status = _objStatus.(UserStatusClass)
+	_cStatus, _okStatus := _objStatus.(UserStatusClass)
+	if !_okStatus {
+		return nil, fmt.Errorf("decode: field status: unexpected type %T", _objStatus)
+	}
+	v.Status = _cStatus
 	return v, nil
 }
 
@@ -1366,6 +1421,9 @@ func DecodeUpdateUserName(r *Reader) (*UpdateUserName, error) {
 	if _ehdrUsernames != nil {
 		return nil, _ehdrUsernames
 	}
+	if _errUsernames := checkVectorConstructor(_vhdrUsernames); _errUsernames != nil {
+		return nil, _errUsernames
+	}
 	_cntUsernames, _ecntUsernames := r.ReadUint32()
 	if _ecntUsernames != nil {
 		return nil, _ecntUsernames
@@ -1379,9 +1437,12 @@ func DecodeUpdateUserName(r *Reader) (*UpdateUserName, error) {
 		if _errUsernames != nil {
 			return nil, _errUsernames
 		}
-		v.Usernames[_iUsernames] = _objUsernames.(*Username)
+		_cUsernames, _okUsernames := _objUsernames.(*Username)
+		if !_okUsernames {
+			return nil, fmt.Errorf("decode: field usernames: unexpected type %T", _objUsernames)
+		}
+		v.Usernames[_iUsernames] = _cUsernames
 	}
-	_ = _vhdrUsernames
 	return v, nil
 }
 
@@ -1445,11 +1506,11 @@ func (v *UpdateNewAuthorization) Encode(b *bytes.Buffer) error {
 // DecodeUpdateNewAuthorization deserializes a UpdateNewAuthorization from a reader using the TL binary protocol.
 func DecodeUpdateNewAuthorization(r *Reader) (*UpdateNewAuthorization, error) {
 	v := &UpdateNewAuthorization{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Unconfirmed = v.Flags.Has(0)
 	_rHash, _eHash := r.ReadInt64()
 	if _eHash != nil {
@@ -1514,7 +1575,11 @@ func DecodeUpdateNewEncryptedMessage(r *Reader) (*UpdateNewEncryptedMessage, err
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(EncryptedMessageClass)
+	_cMessage, _okMessage := _objMessage.(EncryptedMessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
 		return nil, _eQts
@@ -1593,7 +1658,11 @@ func DecodeUpdateEncryption(r *Reader) (*UpdateEncryption, error) {
 	if _errChat != nil {
 		return nil, _errChat
 	}
-	v.Chat = _objChat.(EncryptedChatClass)
+	_cChat, _okChat := _objChat.(EncryptedChatClass)
+	if !_okChat {
+		return nil, fmt.Errorf("decode: field chat: unexpected type %T", _objChat)
+	}
+	v.Chat = _cChat
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -1802,6 +1871,9 @@ func DecodeUpdateDCOptions(r *Reader) (*UpdateDCOptions, error) {
 	if _ehdrDCOptions != nil {
 		return nil, _ehdrDCOptions
 	}
+	if _errDCOptions := checkVectorConstructor(_vhdrDCOptions); _errDCOptions != nil {
+		return nil, _errDCOptions
+	}
 	_cntDCOptions, _ecntDCOptions := r.ReadUint32()
 	if _ecntDCOptions != nil {
 		return nil, _ecntDCOptions
@@ -1815,9 +1887,12 @@ func DecodeUpdateDCOptions(r *Reader) (*UpdateDCOptions, error) {
 		if _errDCOptions != nil {
 			return nil, _errDCOptions
 		}
-		v.DCOptions[_iDCOptions] = _objDCOptions.(*DCOption)
+		_cDCOptions, _okDCOptions := _objDCOptions.(*DCOption)
+		if !_okDCOptions {
+			return nil, fmt.Errorf("decode: field dc_options: unexpected type %T", _objDCOptions)
+		}
+		v.DCOptions[_iDCOptions] = _cDCOptions
 	}
-	_ = _vhdrDCOptions
 	return v, nil
 }
 
@@ -1855,12 +1930,20 @@ func DecodeUpdateNotifySettings(r *Reader) (*UpdateNotifySettings, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(NotifyPeerClass)
+	_cPeer, _okPeer := _objPeer.(NotifyPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objNotifySettings, _errNotifySettings := ReadTLObject(r)
 	if _errNotifySettings != nil {
 		return nil, _errNotifySettings
 	}
-	v.NotifySettings = _objNotifySettings.(*PeerNotifySettings)
+	_cNotifySettings, _okNotifySettings := _objNotifySettings.(*PeerNotifySettings)
+	if !_okNotifySettings {
+		return nil, fmt.Errorf("decode: field notify_settings: unexpected type %T", _objNotifySettings)
+	}
+	v.NotifySettings = _cNotifySettings
 	return v, nil
 }
 
@@ -1924,11 +2007,11 @@ func (v *UpdateServiceNotification) Encode(b *bytes.Buffer) error {
 // DecodeUpdateServiceNotification deserializes a UpdateServiceNotification from a reader using the TL binary protocol.
 func DecodeUpdateServiceNotification(r *Reader) (*UpdateServiceNotification, error) {
 	v := &UpdateServiceNotification{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Popup = v.Flags.Has(0)
 	v.InvertMedia = v.Flags.Has(2)
 	if v.Flags.Has(1) {
@@ -1952,10 +2035,17 @@ func DecodeUpdateServiceNotification(r *Reader) (*UpdateServiceNotification, err
 	if _errMedia != nil {
 		return nil, _errMedia
 	}
-	v.Media = _objMedia.(MessageMediaClass)
+	_cMedia, _okMedia := _objMedia.(MessageMediaClass)
+	if !_okMedia {
+		return nil, fmt.Errorf("decode: field media: unexpected type %T", _objMedia)
+	}
+	v.Media = _cMedia
 	_vhdrEntities, _ehdrEntities := r.ReadUint32()
 	if _ehdrEntities != nil {
 		return nil, _ehdrEntities
+	}
+	if _errEntities := checkVectorConstructor(_vhdrEntities); _errEntities != nil {
+		return nil, _errEntities
 	}
 	_cntEntities, _ecntEntities := r.ReadUint32()
 	if _ecntEntities != nil {
@@ -1970,9 +2060,12 @@ func DecodeUpdateServiceNotification(r *Reader) (*UpdateServiceNotification, err
 		if _errEntities != nil {
 			return nil, _errEntities
 		}
-		v.Entities[_iEntities] = _objEntities.(MessageEntityClass)
+		_cEntities, _okEntities := _objEntities.(MessageEntityClass)
+		if !_okEntities {
+			return nil, fmt.Errorf("decode: field entities: unexpected type %T", _objEntities)
+		}
+		v.Entities[_iEntities] = _cEntities
 	}
-	_ = _vhdrEntities
 	return v, nil
 }
 
@@ -2014,10 +2107,17 @@ func DecodeUpdatePrivacy(r *Reader) (*UpdatePrivacy, error) {
 	if _errKey != nil {
 		return nil, _errKey
 	}
-	v.Key = _objKey.(PrivacyKeyClass)
+	_cKey, _okKey := _objKey.(PrivacyKeyClass)
+	if !_okKey {
+		return nil, fmt.Errorf("decode: field key: unexpected type %T", _objKey)
+	}
+	v.Key = _cKey
 	_vhdrRules, _ehdrRules := r.ReadUint32()
 	if _ehdrRules != nil {
 		return nil, _ehdrRules
+	}
+	if _errRules := checkVectorConstructor(_vhdrRules); _errRules != nil {
+		return nil, _errRules
 	}
 	_cntRules, _ecntRules := r.ReadUint32()
 	if _ecntRules != nil {
@@ -2032,9 +2132,12 @@ func DecodeUpdatePrivacy(r *Reader) (*UpdatePrivacy, error) {
 		if _errRules != nil {
 			return nil, _errRules
 		}
-		v.Rules[_iRules] = _objRules.(PrivacyRuleClass)
+		_cRules, _okRules := _objRules.(PrivacyRuleClass)
+		if !_okRules {
+			return nil, fmt.Errorf("decode: field rules: unexpected type %T", _objRules)
+		}
+		v.Rules[_iRules] = _cRules
 	}
-	_ = _vhdrRules
 	return v, nil
 }
 
@@ -2138,11 +2241,11 @@ func (v *UpdateReadHistoryInbox) Encode(b *bytes.Buffer) error {
 // DecodeUpdateReadHistoryInbox deserializes a UpdateReadHistoryInbox from a reader using the TL binary protocol.
 func DecodeUpdateReadHistoryInbox(r *Reader) (*UpdateReadHistoryInbox, error) {
 	v := &UpdateReadHistoryInbox{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rFolderID, _eFolderID := r.ReadInt32()
 		if _eFolderID != nil {
@@ -2154,7 +2257,11 @@ func DecodeUpdateReadHistoryInbox(r *Reader) (*UpdateReadHistoryInbox, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(1) {
 		_rTopMsgID, _eTopMsgID := r.ReadInt32()
 		if _eTopMsgID != nil {
@@ -2223,7 +2330,11 @@ func DecodeUpdateReadHistoryOutbox(r *Reader) (*UpdateReadHistoryOutbox, error) 
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMaxID, _eMaxID := r.ReadInt32()
 	if _eMaxID != nil {
 		return nil, _eMaxID
@@ -2278,7 +2389,11 @@ func DecodeUpdateWebPage(r *Reader) (*UpdateWebPage, error) {
 	if _errWebpage != nil {
 		return nil, _errWebpage
 	}
-	v.Webpage = _objWebpage.(WebPageClass)
+	_cWebpage, _okWebpage := _objWebpage.(WebPageClass)
+	if !_okWebpage {
+		return nil, fmt.Errorf("decode: field webpage: unexpected type %T", _objWebpage)
+	}
+	v.Webpage = _cWebpage
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
 		return nil, _ePTS
@@ -2338,11 +2453,11 @@ func (v *UpdateReadMessagesContents) Encode(b *bytes.Buffer) error {
 // DecodeUpdateReadMessagesContents deserializes a UpdateReadMessagesContents from a reader using the TL binary protocol.
 func DecodeUpdateReadMessagesContents(r *Reader) (*UpdateReadMessagesContents, error) {
 	v := &UpdateReadMessagesContents{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_vvMessages, _veMessages := r.ReadVectorInt()
 	if _veMessages != nil {
 		return nil, _veMessages
@@ -2410,11 +2525,11 @@ func (v *UpdateChannelTooLong) Encode(b *bytes.Buffer) error {
 // DecodeUpdateChannelTooLong deserializes a UpdateChannelTooLong from a reader using the TL binary protocol.
 func DecodeUpdateChannelTooLong(r *Reader) (*UpdateChannelTooLong, error) {
 	v := &UpdateChannelTooLong{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
 		return nil, _eChannelID
@@ -2502,7 +2617,11 @@ func DecodeUpdateNewChannelMessage(r *Reader) (*UpdateNewChannelMessage, error) 
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
 		return nil, _ePTS
@@ -2564,11 +2683,11 @@ func (v *UpdateReadChannelInbox) Encode(b *bytes.Buffer) error {
 // DecodeUpdateReadChannelInbox deserializes a UpdateReadChannelInbox from a reader using the TL binary protocol.
 func DecodeUpdateReadChannelInbox(r *Reader) (*UpdateReadChannelInbox, error) {
 	v := &UpdateReadChannelInbox{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rFolderID, _eFolderID := r.ReadInt32()
 		if _eFolderID != nil {
@@ -2795,7 +2914,11 @@ func DecodeUpdateNewStickerSet(r *Reader) (*UpdateNewStickerSet, error) {
 	if _errStickerset != nil {
 		return nil, _errStickerset
 	}
-	v.Stickerset = _objStickerset.(StickerSetClass)
+	_cStickerset, _okStickerset := _objStickerset.(StickerSetClass)
+	if !_okStickerset {
+		return nil, fmt.Errorf("decode: field stickerset: unexpected type %T", _objStickerset)
+	}
+	v.Stickerset = _cStickerset
 	return v, nil
 }
 
@@ -2842,11 +2965,11 @@ func (v *UpdateStickerSetsOrder) Encode(b *bytes.Buffer) error {
 // DecodeUpdateStickerSetsOrder deserializes a UpdateStickerSetsOrder from a reader using the TL binary protocol.
 func DecodeUpdateStickerSetsOrder(r *Reader) (*UpdateStickerSetsOrder, error) {
 	v := &UpdateStickerSetsOrder{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Masks = v.Flags.Has(0)
 	v.Emojis = v.Flags.Has(1)
 	_vvOrder, _veOrder := r.ReadVectorLong()
@@ -2898,11 +3021,11 @@ func (v *UpdateStickerSets) Encode(b *bytes.Buffer) error {
 // DecodeUpdateStickerSets deserializes a UpdateStickerSets from a reader using the TL binary protocol.
 func DecodeUpdateStickerSets(r *Reader) (*UpdateStickerSets, error) {
 	v := &UpdateStickerSets{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Masks = v.Flags.Has(0)
 	v.Emojis = v.Flags.Has(1)
 	return v, nil
@@ -2992,11 +3115,11 @@ func (v *UpdateBotInlineQuery) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotInlineQuery deserializes a UpdateBotInlineQuery from a reader using the TL binary protocol.
 func DecodeUpdateBotInlineQuery(r *Reader) (*UpdateBotInlineQuery, error) {
 	v := &UpdateBotInlineQuery{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -3017,14 +3140,22 @@ func DecodeUpdateBotInlineQuery(r *Reader) (*UpdateBotInlineQuery, error) {
 		if _errGeo != nil {
 			return nil, _errGeo
 		}
-		v.Geo = _objGeo.(GeoPointClass)
+		_cGeo, _okGeo := _objGeo.(GeoPointClass)
+		if !_okGeo {
+			return nil, fmt.Errorf("decode: field geo: unexpected type %T", _objGeo)
+		}
+		v.Geo = _cGeo
 	}
 	if v.Flags.Has(1) {
 		_objPeerType, _errPeerType := ReadTLObject(r)
 		if _errPeerType != nil {
 			return nil, _errPeerType
 		}
-		v.PeerType = _objPeerType.(InlineQueryPeerTypeClass)
+		_cPeerType, _okPeerType := _objPeerType.(InlineQueryPeerTypeClass)
+		if !_okPeerType {
+			return nil, fmt.Errorf("decode: field peer_type: unexpected type %T", _objPeerType)
+		}
+		v.PeerType = _cPeerType
 	}
 	_rOffset, _eOffset := r.ReadString()
 	if _eOffset != nil {
@@ -3087,11 +3218,11 @@ func (v *UpdateBotInlineSend) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotInlineSend deserializes a UpdateBotInlineSend from a reader using the TL binary protocol.
 func DecodeUpdateBotInlineSend(r *Reader) (*UpdateBotInlineSend, error) {
 	v := &UpdateBotInlineSend{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rUserID, _eUserID := r.ReadInt64()
 	if _eUserID != nil {
 		return nil, _eUserID
@@ -3107,7 +3238,11 @@ func DecodeUpdateBotInlineSend(r *Reader) (*UpdateBotInlineSend, error) {
 		if _errGeo != nil {
 			return nil, _errGeo
 		}
-		v.Geo = _objGeo.(GeoPointClass)
+		_cGeo, _okGeo := _objGeo.(GeoPointClass)
+		if !_okGeo {
+			return nil, fmt.Errorf("decode: field geo: unexpected type %T", _objGeo)
+		}
+		v.Geo = _cGeo
 	}
 	_rID, _eID := r.ReadString()
 	if _eID != nil {
@@ -3119,7 +3254,11 @@ func DecodeUpdateBotInlineSend(r *Reader) (*UpdateBotInlineSend, error) {
 		if _errMsgID != nil {
 			return nil, _errMsgID
 		}
-		v.MsgID = _objMsgID.(InputBotInlineMessageIDClass)
+		_cMsgID, _okMsgID := _objMsgID.(InputBotInlineMessageIDClass)
+		if !_okMsgID {
+			return nil, fmt.Errorf("decode: field msg_id: unexpected type %T", _objMsgID)
+		}
+		v.MsgID = _cMsgID
 	}
 	return v, nil
 }
@@ -3160,7 +3299,11 @@ func DecodeUpdateEditChannelMessage(r *Reader) (*UpdateEditChannelMessage, error
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
 		return nil, _ePTS
@@ -3231,11 +3374,11 @@ func (v *UpdateBotCallbackQuery) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotCallbackQuery deserializes a UpdateBotCallbackQuery from a reader using the TL binary protocol.
 func DecodeUpdateBotCallbackQuery(r *Reader) (*UpdateBotCallbackQuery, error) {
 	v := &UpdateBotCallbackQuery{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -3250,7 +3393,11 @@ func DecodeUpdateBotCallbackQuery(r *Reader) (*UpdateBotCallbackQuery, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -3314,7 +3461,11 @@ func DecodeUpdateEditMessage(r *Reader) (*UpdateEditMessage, error) {
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
 		return nil, _ePTS
@@ -3383,11 +3534,11 @@ func (v *UpdateInlineBotCallbackQuery) Encode(b *bytes.Buffer) error {
 // DecodeUpdateInlineBotCallbackQuery deserializes a UpdateInlineBotCallbackQuery from a reader using the TL binary protocol.
 func DecodeUpdateInlineBotCallbackQuery(r *Reader) (*UpdateInlineBotCallbackQuery, error) {
 	v := &UpdateInlineBotCallbackQuery{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -3402,7 +3553,11 @@ func DecodeUpdateInlineBotCallbackQuery(r *Reader) (*UpdateInlineBotCallbackQuer
 	if _errMsgID != nil {
 		return nil, _errMsgID
 	}
-	v.MsgID = _objMsgID.(InputBotInlineMessageIDClass)
+	_cMsgID, _okMsgID := _objMsgID.(InputBotInlineMessageIDClass)
+	if !_okMsgID {
+		return nil, fmt.Errorf("decode: field msg_id: unexpected type %T", _objMsgID)
+	}
+	v.MsgID = _cMsgID
 	_rChatInstance, _eChatInstance := r.ReadInt64()
 	if _eChatInstance != nil {
 		return nil, _eChatInstance
@@ -3519,16 +3674,20 @@ func (v *UpdateDraftMessage) Encode(b *bytes.Buffer) error {
 // DecodeUpdateDraftMessage deserializes a UpdateDraftMessage from a reader using the TL binary protocol.
 func DecodeUpdateDraftMessage(r *Reader) (*UpdateDraftMessage, error) {
 	v := &UpdateDraftMessage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(0) {
 		_rTopMsgID, _eTopMsgID := r.ReadInt32()
 		if _eTopMsgID != nil {
@@ -3541,13 +3700,21 @@ func DecodeUpdateDraftMessage(r *Reader) (*UpdateDraftMessage, error) {
 		if _errSavedPeerID != nil {
 			return nil, _errSavedPeerID
 		}
-		v.SavedPeerID = _objSavedPeerID.(PeerClass)
+		_cSavedPeerID, _okSavedPeerID := _objSavedPeerID.(PeerClass)
+		if !_okSavedPeerID {
+			return nil, fmt.Errorf("decode: field saved_peer_id: unexpected type %T", _objSavedPeerID)
+		}
+		v.SavedPeerID = _cSavedPeerID
 	}
 	_objDraft, _errDraft := ReadTLObject(r)
 	if _errDraft != nil {
 		return nil, _errDraft
 	}
-	v.Draft = _objDraft.(DraftMessageClass)
+	_cDraft, _okDraft := _objDraft.(DraftMessageClass)
+	if !_okDraft {
+		return nil, fmt.Errorf("decode: field draft: unexpected type %T", _objDraft)
+	}
+	v.Draft = _cDraft
 	return v, nil
 }
 
@@ -3710,7 +3877,11 @@ func DecodeUpdateChannelWebPage(r *Reader) (*UpdateChannelWebPage, error) {
 	if _errWebpage != nil {
 		return nil, _errWebpage
 	}
-	v.Webpage = _objWebpage.(WebPageClass)
+	_cWebpage, _okWebpage := _objWebpage.(WebPageClass)
+	if !_okWebpage {
+		return nil, fmt.Errorf("decode: field webpage: unexpected type %T", _objWebpage)
+	}
+	v.Webpage = _cWebpage
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
 		return nil, _ePTS
@@ -3770,11 +3941,11 @@ func (v *UpdateDialogPinned) Encode(b *bytes.Buffer) error {
 // DecodeUpdateDialogPinned deserializes a UpdateDialogPinned from a reader using the TL binary protocol.
 func DecodeUpdateDialogPinned(r *Reader) (*UpdateDialogPinned, error) {
 	v := &UpdateDialogPinned{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Pinned = v.Flags.Has(0)
 	if v.Flags.Has(1) {
 		_rFolderID, _eFolderID := r.ReadInt32()
@@ -3787,7 +3958,11 @@ func DecodeUpdateDialogPinned(r *Reader) (*UpdateDialogPinned, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(DialogPeerClass)
+	_cPeer, _okPeer := _objPeer.(DialogPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	return v, nil
 }
 
@@ -3842,11 +4017,11 @@ func (v *UpdatePinnedDialogs) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePinnedDialogs deserializes a UpdatePinnedDialogs from a reader using the TL binary protocol.
 func DecodeUpdatePinnedDialogs(r *Reader) (*UpdatePinnedDialogs, error) {
 	v := &UpdatePinnedDialogs{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(1) {
 		_rFolderID, _eFolderID := r.ReadInt32()
 		if _eFolderID != nil {
@@ -3858,6 +4033,9 @@ func DecodeUpdatePinnedDialogs(r *Reader) (*UpdatePinnedDialogs, error) {
 		_vhdrOrder, _ehdrOrder := r.ReadUint32()
 		if _ehdrOrder != nil {
 			return nil, _ehdrOrder
+		}
+		if _errOrder := checkVectorConstructor(_vhdrOrder); _errOrder != nil {
+			return nil, _errOrder
 		}
 		_cntOrder, _ecntOrder := r.ReadUint32()
 		if _ecntOrder != nil {
@@ -3872,9 +4050,12 @@ func DecodeUpdatePinnedDialogs(r *Reader) (*UpdatePinnedDialogs, error) {
 			if _errOrder != nil {
 				return nil, _errOrder
 			}
-			v.Order[_iOrder] = _objOrder.(DialogPeerClass)
+			_cOrder, _okOrder := _objOrder.(DialogPeerClass)
+			if !_okOrder {
+				return nil, fmt.Errorf("decode: field order: unexpected type %T", _objOrder)
+			}
+			v.Order[_iOrder] = _cOrder
 		}
-		_ = _vhdrOrder
 	}
 	return v, nil
 }
@@ -3911,7 +4092,11 @@ func DecodeUpdateBotWebhookJSON(r *Reader) (*UpdateBotWebhookJSON, error) {
 	if _errData != nil {
 		return nil, _errData
 	}
-	v.Data = _objData.(*DataJSON)
+	_cData, _okData := _objData.(*DataJSON)
+	if !_okData {
+		return nil, fmt.Errorf("decode: field data: unexpected type %T", _objData)
+	}
+	v.Data = _cData
 	return v, nil
 }
 
@@ -3956,7 +4141,11 @@ func DecodeUpdateBotWebhookJSONQuery(r *Reader) (*UpdateBotWebhookJSONQuery, err
 	if _errData != nil {
 		return nil, _errData
 	}
-	v.Data = _objData.(*DataJSON)
+	_cData, _okData := _objData.(*DataJSON)
+	if !_okData {
+		return nil, fmt.Errorf("decode: field data: unexpected type %T", _objData)
+	}
+	v.Data = _cData
 	_rTimeout, _eTimeout := r.ReadInt32()
 	if _eTimeout != nil {
 		return nil, _eTimeout
@@ -4018,7 +4207,11 @@ func DecodeUpdateBotShippingQuery(r *Reader) (*UpdateBotShippingQuery, error) {
 	if _errShippingAddress != nil {
 		return nil, _errShippingAddress
 	}
-	v.ShippingAddress = _objShippingAddress.(*PostAddress)
+	_cShippingAddress, _okShippingAddress := _objShippingAddress.(*PostAddress)
+	if !_okShippingAddress {
+		return nil, fmt.Errorf("decode: field shipping_address: unexpected type %T", _objShippingAddress)
+	}
+	v.ShippingAddress = _cShippingAddress
 	return v, nil
 }
 
@@ -4079,11 +4272,11 @@ func (v *UpdateBotPrecheckoutQuery) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotPrecheckoutQuery deserializes a UpdateBotPrecheckoutQuery from a reader using the TL binary protocol.
 func DecodeUpdateBotPrecheckoutQuery(r *Reader) (*UpdateBotPrecheckoutQuery, error) {
 	v := &UpdateBotPrecheckoutQuery{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -4104,7 +4297,11 @@ func DecodeUpdateBotPrecheckoutQuery(r *Reader) (*UpdateBotPrecheckoutQuery, err
 		if _errInfo != nil {
 			return nil, _errInfo
 		}
-		v.Info = _objInfo.(*PaymentRequestedInfo)
+		_cInfo, _okInfo := _objInfo.(*PaymentRequestedInfo)
+		if !_okInfo {
+			return nil, fmt.Errorf("decode: field info: unexpected type %T", _objInfo)
+		}
+		v.Info = _cInfo
 	}
 	if v.Flags.Has(1) {
 		_rShippingOptionID, _eShippingOptionID := r.ReadString()
@@ -4158,7 +4355,11 @@ func DecodeUpdatePhoneCall(r *Reader) (*UpdatePhoneCall, error) {
 	if _errPhoneCall != nil {
 		return nil, _errPhoneCall
 	}
-	v.PhoneCall = _objPhoneCall.(PhoneCallClass)
+	_cPhoneCall, _okPhoneCall := _objPhoneCall.(PhoneCallClass)
+	if !_okPhoneCall {
+		return nil, fmt.Errorf("decode: field phone_call: unexpected type %T", _objPhoneCall)
+	}
+	v.PhoneCall = _cPhoneCall
 	return v, nil
 }
 
@@ -4230,7 +4431,11 @@ func DecodeUpdateLangPack(r *Reader) (*UpdateLangPack, error) {
 	if _errDifference != nil {
 		return nil, _errDifference
 	}
-	v.Difference = _objDifference.(*LangPackDifference)
+	_cDifference, _okDifference := _objDifference.(*LangPackDifference)
+	if !_okDifference {
+		return nil, fmt.Errorf("decode: field difference: unexpected type %T", _objDifference)
+	}
+	v.Difference = _cDifference
 	return v, nil
 }
 
@@ -4314,11 +4519,11 @@ func (v *UpdateChannelReadMessagesContents) Encode(b *bytes.Buffer) error {
 // DecodeUpdateChannelReadMessagesContents deserializes a UpdateChannelReadMessagesContents from a reader using the TL binary protocol.
 func DecodeUpdateChannelReadMessagesContents(r *Reader) (*UpdateChannelReadMessagesContents, error) {
 	v := &UpdateChannelReadMessagesContents{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
 		return nil, _eChannelID
@@ -4336,7 +4541,11 @@ func DecodeUpdateChannelReadMessagesContents(r *Reader) (*UpdateChannelReadMessa
 		if _errSavedPeerID != nil {
 			return nil, _errSavedPeerID
 		}
-		v.SavedPeerID = _objSavedPeerID.(PeerClass)
+		_cSavedPeerID, _okSavedPeerID := _objSavedPeerID.(PeerClass)
+		if !_okSavedPeerID {
+			return nil, fmt.Errorf("decode: field saved_peer_id: unexpected type %T", _objSavedPeerID)
+		}
+		v.SavedPeerID = _cSavedPeerID
 	}
 	_vvMessages, _veMessages := r.ReadVectorInt()
 	if _veMessages != nil {
@@ -4464,23 +4673,31 @@ func (v *UpdateDialogUnreadMark) Encode(b *bytes.Buffer) error {
 // DecodeUpdateDialogUnreadMark deserializes a UpdateDialogUnreadMark from a reader using the TL binary protocol.
 func DecodeUpdateDialogUnreadMark(r *Reader) (*UpdateDialogUnreadMark, error) {
 	v := &UpdateDialogUnreadMark{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Unread = v.Flags.Has(0)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(DialogPeerClass)
+	_cPeer, _okPeer := _objPeer.(DialogPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(1) {
 		_objSavedPeerID, _errSavedPeerID := ReadTLObject(r)
 		if _errSavedPeerID != nil {
 			return nil, _errSavedPeerID
 		}
-		v.SavedPeerID = _objSavedPeerID.(PeerClass)
+		_cSavedPeerID, _okSavedPeerID := _objSavedPeerID.(PeerClass)
+		if !_okSavedPeerID {
+			return nil, fmt.Errorf("decode: field saved_peer_id: unexpected type %T", _objSavedPeerID)
+		}
+		v.SavedPeerID = _cSavedPeerID
 	}
 	return v, nil
 }
@@ -4550,17 +4767,21 @@ func (v *UpdateMessagePoll) Encode(b *bytes.Buffer) error {
 // DecodeUpdateMessagePoll deserializes a UpdateMessagePoll from a reader using the TL binary protocol.
 func DecodeUpdateMessagePoll(r *Reader) (*UpdateMessagePoll, error) {
 	v := &UpdateMessagePoll{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(1) {
 		_objPeer, _errPeer := ReadTLObject(r)
 		if _errPeer != nil {
 			return nil, _errPeer
 		}
-		v.Peer = _objPeer.(PeerClass)
+		_cPeer, _okPeer := _objPeer.(PeerClass)
+		if !_okPeer {
+			return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+		}
+		v.Peer = _cPeer
 	}
 	if v.Flags.Has(1) {
 		_rMsgID, _eMsgID := r.ReadInt32()
@@ -4586,13 +4807,21 @@ func DecodeUpdateMessagePoll(r *Reader) (*UpdateMessagePoll, error) {
 		if _errPoll != nil {
 			return nil, _errPoll
 		}
-		v.Poll = _objPoll.(*Poll)
+		_cPoll, _okPoll := _objPoll.(*Poll)
+		if !_okPoll {
+			return nil, fmt.Errorf("decode: field poll: unexpected type %T", _objPoll)
+		}
+		v.Poll = _cPoll
 	}
 	_objResults, _errResults := ReadTLObject(r)
 	if _errResults != nil {
 		return nil, _errResults
 	}
-	v.Results = _objResults.(*PollResults)
+	_cResults, _okResults := _objResults.(*PollResults)
+	if !_okResults {
+		return nil, fmt.Errorf("decode: field results: unexpected type %T", _objResults)
+	}
+	v.Results = _cResults
 	return v, nil
 }
 
@@ -4632,12 +4861,20 @@ func DecodeUpdateChatDefaultBannedRights(r *Reader) (*UpdateChatDefaultBannedRig
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objDefaultBannedRights, _errDefaultBannedRights := ReadTLObject(r)
 	if _errDefaultBannedRights != nil {
 		return nil, _errDefaultBannedRights
 	}
-	v.DefaultBannedRights = _objDefaultBannedRights.(*ChatBannedRights)
+	_cDefaultBannedRights, _okDefaultBannedRights := _objDefaultBannedRights.(*ChatBannedRights)
+	if !_okDefaultBannedRights {
+		return nil, fmt.Errorf("decode: field default_banned_rights: unexpected type %T", _objDefaultBannedRights)
+	}
+	v.DefaultBannedRights = _cDefaultBannedRights
 	_rVersion, _eVersion := r.ReadInt32()
 	if _eVersion != nil {
 		return nil, _eVersion
@@ -4686,6 +4923,9 @@ func DecodeUpdateFolderPeers(r *Reader) (*UpdateFolderPeers, error) {
 	if _ehdrFolderPeers != nil {
 		return nil, _ehdrFolderPeers
 	}
+	if _errFolderPeers := checkVectorConstructor(_vhdrFolderPeers); _errFolderPeers != nil {
+		return nil, _errFolderPeers
+	}
 	_cntFolderPeers, _ecntFolderPeers := r.ReadUint32()
 	if _ecntFolderPeers != nil {
 		return nil, _ecntFolderPeers
@@ -4699,9 +4939,12 @@ func DecodeUpdateFolderPeers(r *Reader) (*UpdateFolderPeers, error) {
 		if _errFolderPeers != nil {
 			return nil, _errFolderPeers
 		}
-		v.FolderPeers[_iFolderPeers] = _objFolderPeers.(*FolderPeer)
+		_cFolderPeers, _okFolderPeers := _objFolderPeers.(*FolderPeer)
+		if !_okFolderPeers {
+			return nil, fmt.Errorf("decode: field folder_peers: unexpected type %T", _objFolderPeers)
+		}
+		v.FolderPeers[_iFolderPeers] = _cFolderPeers
 	}
-	_ = _vhdrFolderPeers
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
 		return nil, _ePTS
@@ -4749,12 +4992,20 @@ func DecodeUpdatePeerSettings(r *Reader) (*UpdatePeerSettings, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objSettings, _errSettings := ReadTLObject(r)
 	if _errSettings != nil {
 		return nil, _errSettings
 	}
-	v.Settings = _objSettings.(PeerSettingsClass)
+	_cSettings, _okSettings := _objSettings.(PeerSettingsClass)
+	if !_okSettings {
+		return nil, fmt.Errorf("decode: field settings: unexpected type %T", _objSettings)
+	}
+	v.Settings = _cSettings
 	return v, nil
 }
 
@@ -4794,6 +5045,9 @@ func DecodeUpdatePeerLocated(r *Reader) (*UpdatePeerLocated, error) {
 	if _ehdrPeers != nil {
 		return nil, _ehdrPeers
 	}
+	if _errPeers := checkVectorConstructor(_vhdrPeers); _errPeers != nil {
+		return nil, _errPeers
+	}
 	_cntPeers, _ecntPeers := r.ReadUint32()
 	if _ecntPeers != nil {
 		return nil, _ecntPeers
@@ -4807,9 +5061,12 @@ func DecodeUpdatePeerLocated(r *Reader) (*UpdatePeerLocated, error) {
 		if _errPeers != nil {
 			return nil, _errPeers
 		}
-		v.Peers[_iPeers] = _objPeers.(PeerLocatedClass)
+		_cPeers, _okPeers := _objPeers.(PeerLocatedClass)
+		if !_okPeers {
+			return nil, fmt.Errorf("decode: field peers: unexpected type %T", _objPeers)
+		}
+		v.Peers[_iPeers] = _cPeers
 	}
-	_ = _vhdrPeers
 	return v, nil
 }
 
@@ -4845,7 +5102,11 @@ func DecodeUpdateNewScheduledMessage(r *Reader) (*UpdateNewScheduledMessage, err
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	return v, nil
 }
 
@@ -4893,16 +5154,20 @@ func (v *UpdateDeleteScheduledMessages) Encode(b *bytes.Buffer) error {
 // DecodeUpdateDeleteScheduledMessages deserializes a UpdateDeleteScheduledMessages from a reader using the TL binary protocol.
 func DecodeUpdateDeleteScheduledMessages(r *Reader) (*UpdateDeleteScheduledMessages, error) {
 	v := &UpdateDeleteScheduledMessages{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_vvMessages, _veMessages := r.ReadVectorInt()
 	if _veMessages != nil {
 		return nil, _veMessages
@@ -4950,7 +5215,11 @@ func DecodeUpdateTheme(r *Reader) (*UpdateTheme, error) {
 	if _errTheme != nil {
 		return nil, _errTheme
 	}
-	v.Theme = _objTheme.(*Theme)
+	_cTheme, _okTheme := _objTheme.(*Theme)
+	if !_okTheme {
+		return nil, fmt.Errorf("decode: field theme: unexpected type %T", _objTheme)
+	}
+	v.Theme = _cTheme
 	return v, nil
 }
 
@@ -4988,7 +5257,11 @@ func DecodeUpdateGeoLiveViewed(r *Reader) (*UpdateGeoLiveViewed, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -5071,7 +5344,11 @@ func DecodeUpdateMessagePollVote(r *Reader) (*UpdateMessagePollVote, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_vvOptions, _veOptions := r.ReadVectorBytes()
 	if _veOptions != nil {
 		return nil, _veOptions
@@ -5132,11 +5409,11 @@ func (v *UpdateDialogFilter) Encode(b *bytes.Buffer) error {
 // DecodeUpdateDialogFilter deserializes a UpdateDialogFilter from a reader using the TL binary protocol.
 func DecodeUpdateDialogFilter(r *Reader) (*UpdateDialogFilter, error) {
 	v := &UpdateDialogFilter{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rID, _eID := r.ReadInt32()
 	if _eID != nil {
 		return nil, _eID
@@ -5147,7 +5424,11 @@ func DecodeUpdateDialogFilter(r *Reader) (*UpdateDialogFilter, error) {
 		if _errFilter != nil {
 			return nil, _errFilter
 		}
-		v.Filter = _objFilter.(DialogFilterClass)
+		_cFilter, _okFilter := _objFilter.(DialogFilterClass)
+		if !_okFilter {
+			return nil, fmt.Errorf("decode: field filter: unexpected type %T", _objFilter)
+		}
+		v.Filter = _cFilter
 	}
 	return v, nil
 }
@@ -5363,11 +5644,11 @@ func (v *UpdateReadChannelDiscussionInbox) Encode(b *bytes.Buffer) error {
 // DecodeUpdateReadChannelDiscussionInbox deserializes a UpdateReadChannelDiscussionInbox from a reader using the TL binary protocol.
 func DecodeUpdateReadChannelDiscussionInbox(r *Reader) (*UpdateReadChannelDiscussionInbox, error) {
 	v := &UpdateReadChannelDiscussionInbox{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
 		return nil, _eChannelID
@@ -5493,18 +5774,22 @@ func (v *UpdatePeerBlocked) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePeerBlocked deserializes a UpdatePeerBlocked from a reader using the TL binary protocol.
 func DecodeUpdatePeerBlocked(r *Reader) (*UpdatePeerBlocked, error) {
 	v := &UpdatePeerBlocked{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Blocked = v.Flags.Has(0)
 	v.BlockedMyStoriesFrom = v.Flags.Has(1)
 	_objPeerID, _errPeerID := ReadTLObject(r)
 	if _errPeerID != nil {
 		return nil, _errPeerID
 	}
-	v.PeerID = _objPeerID.(PeerClass)
+	_cPeerID, _okPeerID := _objPeerID.(PeerClass)
+	if !_okPeerID {
+		return nil, fmt.Errorf("decode: field peer_id: unexpected type %T", _objPeerID)
+	}
+	v.PeerID = _cPeerID
 	return v, nil
 }
 
@@ -5554,11 +5839,11 @@ func (v *UpdateChannelUserTyping) Encode(b *bytes.Buffer) error {
 // DecodeUpdateChannelUserTyping deserializes a UpdateChannelUserTyping from a reader using the TL binary protocol.
 func DecodeUpdateChannelUserTyping(r *Reader) (*UpdateChannelUserTyping, error) {
 	v := &UpdateChannelUserTyping{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
 		return nil, _eChannelID
@@ -5575,12 +5860,20 @@ func DecodeUpdateChannelUserTyping(r *Reader) (*UpdateChannelUserTyping, error) 
 	if _errFromID != nil {
 		return nil, _errFromID
 	}
-	v.FromID = _objFromID.(PeerClass)
+	_cFromID, _okFromID := _objFromID.(PeerClass)
+	if !_okFromID {
+		return nil, fmt.Errorf("decode: field from_id: unexpected type %T", _objFromID)
+	}
+	v.FromID = _cFromID
 	_objAction, _errAction := ReadTLObject(r)
 	if _errAction != nil {
 		return nil, _errAction
 	}
-	v.Action = _objAction.(SendMessageActionClass)
+	_cAction, _okAction := _objAction.(SendMessageActionClass)
+	if !_okAction {
+		return nil, fmt.Errorf("decode: field action: unexpected type %T", _objAction)
+	}
+	v.Action = _cAction
 	return v, nil
 }
 
@@ -5629,17 +5922,21 @@ func (v *UpdatePinnedMessages) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePinnedMessages deserializes a UpdatePinnedMessages from a reader using the TL binary protocol.
 func DecodeUpdatePinnedMessages(r *Reader) (*UpdatePinnedMessages, error) {
 	v := &UpdatePinnedMessages{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Pinned = v.Flags.Has(0)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_vvMessages, _veMessages := r.ReadVectorInt()
 	if _veMessages != nil {
 		return nil, _veMessages
@@ -5703,11 +6000,11 @@ func (v *UpdatePinnedChannelMessages) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePinnedChannelMessages deserializes a UpdatePinnedChannelMessages from a reader using the TL binary protocol.
 func DecodeUpdatePinnedChannelMessages(r *Reader) (*UpdatePinnedChannelMessages, error) {
 	v := &UpdatePinnedChannelMessages{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Pinned = v.Flags.Has(0)
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
@@ -5808,10 +6105,17 @@ func DecodeUpdateGroupCallParticipants(r *Reader) (*UpdateGroupCallParticipants,
 	if _errCall != nil {
 		return nil, _errCall
 	}
-	v.Call = _objCall.(InputGroupCallClass)
+	_cCall, _okCall := _objCall.(InputGroupCallClass)
+	if !_okCall {
+		return nil, fmt.Errorf("decode: field call: unexpected type %T", _objCall)
+	}
+	v.Call = _cCall
 	_vhdrParticipants, _ehdrParticipants := r.ReadUint32()
 	if _ehdrParticipants != nil {
 		return nil, _ehdrParticipants
+	}
+	if _errParticipants := checkVectorConstructor(_vhdrParticipants); _errParticipants != nil {
+		return nil, _errParticipants
 	}
 	_cntParticipants, _ecntParticipants := r.ReadUint32()
 	if _ecntParticipants != nil {
@@ -5826,9 +6130,12 @@ func DecodeUpdateGroupCallParticipants(r *Reader) (*UpdateGroupCallParticipants,
 		if _errParticipants != nil {
 			return nil, _errParticipants
 		}
-		v.Participants[_iParticipants] = _objParticipants.(*GroupCallParticipant)
+		_cParticipants, _okParticipants := _objParticipants.(*GroupCallParticipant)
+		if !_okParticipants {
+			return nil, fmt.Errorf("decode: field participants: unexpected type %T", _objParticipants)
+		}
+		v.Participants[_iParticipants] = _cParticipants
 	}
-	_ = _vhdrParticipants
 	_rVersion, _eVersion := r.ReadInt32()
 	if _eVersion != nil {
 		return nil, _eVersion
@@ -5883,24 +6190,32 @@ func (v *UpdateGroupCall) Encode(b *bytes.Buffer) error {
 // DecodeUpdateGroupCall deserializes a UpdateGroupCall from a reader using the TL binary protocol.
 func DecodeUpdateGroupCall(r *Reader) (*UpdateGroupCall, error) {
 	v := &UpdateGroupCall{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.LiveStory = v.Flags.Has(2)
 	if v.Flags.Has(1) {
 		_objPeer, _errPeer := ReadTLObject(r)
 		if _errPeer != nil {
 			return nil, _errPeer
 		}
-		v.Peer = _objPeer.(PeerClass)
+		_cPeer, _okPeer := _objPeer.(PeerClass)
+		if !_okPeer {
+			return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+		}
+		v.Peer = _cPeer
 	}
 	_objCall, _errCall := ReadTLObject(r)
 	if _errCall != nil {
 		return nil, _errCall
 	}
-	v.Call = _objCall.(GroupCallClass)
+	_cCall, _okCall := _objCall.(GroupCallClass)
+	if !_okCall {
+		return nil, fmt.Errorf("decode: field call: unexpected type %T", _objCall)
+	}
+	v.Call = _cCall
 	return v, nil
 }
 
@@ -5946,16 +6261,20 @@ func (v *UpdatePeerHistoryTTL) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePeerHistoryTTL deserializes a UpdatePeerHistoryTTL from a reader using the TL binary protocol.
 func DecodeUpdatePeerHistoryTTL(r *Reader) (*UpdatePeerHistoryTTL, error) {
 	v := &UpdatePeerHistoryTTL{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(0) {
 		_rTTLPeriod, _eTTLPeriod := r.ReadInt32()
 		if _eTTLPeriod != nil {
@@ -6030,11 +6349,11 @@ func (v *UpdateChatParticipant) Encode(b *bytes.Buffer) error {
 // DecodeUpdateChatParticipant deserializes a UpdateChatParticipant from a reader using the TL binary protocol.
 func DecodeUpdateChatParticipant(r *Reader) (*UpdateChatParticipant, error) {
 	v := &UpdateChatParticipant{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rChatID, _eChatID := r.ReadInt64()
 	if _eChatID != nil {
 		return nil, _eChatID
@@ -6060,21 +6379,33 @@ func DecodeUpdateChatParticipant(r *Reader) (*UpdateChatParticipant, error) {
 		if _errPrevParticipant != nil {
 			return nil, _errPrevParticipant
 		}
-		v.PrevParticipant = _objPrevParticipant.(ChatParticipantClass)
+		_cPrevParticipant, _okPrevParticipant := _objPrevParticipant.(ChatParticipantClass)
+		if !_okPrevParticipant {
+			return nil, fmt.Errorf("decode: field prev_participant: unexpected type %T", _objPrevParticipant)
+		}
+		v.PrevParticipant = _cPrevParticipant
 	}
 	if v.Flags.Has(1) {
 		_objNewParticipant, _errNewParticipant := ReadTLObject(r)
 		if _errNewParticipant != nil {
 			return nil, _errNewParticipant
 		}
-		v.NewParticipant = _objNewParticipant.(ChatParticipantClass)
+		_cNewParticipant, _okNewParticipant := _objNewParticipant.(ChatParticipantClass)
+		if !_okNewParticipant {
+			return nil, fmt.Errorf("decode: field new_participant: unexpected type %T", _objNewParticipant)
+		}
+		v.NewParticipant = _cNewParticipant
 	}
 	if v.Flags.Has(2) {
 		_objInvite, _errInvite := ReadTLObject(r)
 		if _errInvite != nil {
 			return nil, _errInvite
 		}
-		v.Invite = _objInvite.(ExportedChatInviteClass)
+		_cInvite, _okInvite := _objInvite.(ExportedChatInviteClass)
+		if !_okInvite {
+			return nil, fmt.Errorf("decode: field invite: unexpected type %T", _objInvite)
+		}
+		v.Invite = _cInvite
 	}
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
@@ -6152,11 +6483,11 @@ func (v *UpdateChannelParticipant) Encode(b *bytes.Buffer) error {
 // DecodeUpdateChannelParticipant deserializes a UpdateChannelParticipant from a reader using the TL binary protocol.
 func DecodeUpdateChannelParticipant(r *Reader) (*UpdateChannelParticipant, error) {
 	v := &UpdateChannelParticipant{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.ViaChatlist = v.Flags.Has(3)
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
@@ -6183,21 +6514,33 @@ func DecodeUpdateChannelParticipant(r *Reader) (*UpdateChannelParticipant, error
 		if _errPrevParticipant != nil {
 			return nil, _errPrevParticipant
 		}
-		v.PrevParticipant = _objPrevParticipant.(ChannelParticipantClass)
+		_cPrevParticipant, _okPrevParticipant := _objPrevParticipant.(ChannelParticipantClass)
+		if !_okPrevParticipant {
+			return nil, fmt.Errorf("decode: field prev_participant: unexpected type %T", _objPrevParticipant)
+		}
+		v.PrevParticipant = _cPrevParticipant
 	}
 	if v.Flags.Has(1) {
 		_objNewParticipant, _errNewParticipant := ReadTLObject(r)
 		if _errNewParticipant != nil {
 			return nil, _errNewParticipant
 		}
-		v.NewParticipant = _objNewParticipant.(ChannelParticipantClass)
+		_cNewParticipant, _okNewParticipant := _objNewParticipant.(ChannelParticipantClass)
+		if !_okNewParticipant {
+			return nil, fmt.Errorf("decode: field new_participant: unexpected type %T", _objNewParticipant)
+		}
+		v.NewParticipant = _cNewParticipant
 	}
 	if v.Flags.Has(2) {
 		_objInvite, _errInvite := ReadTLObject(r)
 		if _errInvite != nil {
 			return nil, _errInvite
 		}
-		v.Invite = _objInvite.(ExportedChatInviteClass)
+		_cInvite, _okInvite := _objInvite.(ExportedChatInviteClass)
+		if !_okInvite {
+			return nil, fmt.Errorf("decode: field invite: unexpected type %T", _objInvite)
+		}
+		v.Invite = _cInvite
 	}
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
@@ -6303,17 +6646,21 @@ func (v *UpdateGroupCallConnection) Encode(b *bytes.Buffer) error {
 // DecodeUpdateGroupCallConnection deserializes a UpdateGroupCallConnection from a reader using the TL binary protocol.
 func DecodeUpdateGroupCallConnection(r *Reader) (*UpdateGroupCallConnection, error) {
 	v := &UpdateGroupCallConnection{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Presentation = v.Flags.Has(0)
 	_objParams, _errParams := ReadTLObject(r)
 	if _errParams != nil {
 		return nil, _errParams
 	}
-	v.Params = _objParams.(*DataJSON)
+	_cParams, _okParams := _objParams.(*DataJSON)
+	if !_okParams {
+		return nil, fmt.Errorf("decode: field params: unexpected type %T", _objParams)
+	}
+	v.Params = _cParams
 	return v, nil
 }
 
@@ -6357,7 +6704,11 @@ func DecodeUpdateBotCommands(r *Reader) (*UpdateBotCommands, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rBotID, _eBotID := r.ReadInt64()
 	if _eBotID != nil {
 		return nil, _eBotID
@@ -6366,6 +6717,9 @@ func DecodeUpdateBotCommands(r *Reader) (*UpdateBotCommands, error) {
 	_vhdrCommands, _ehdrCommands := r.ReadUint32()
 	if _ehdrCommands != nil {
 		return nil, _ehdrCommands
+	}
+	if _errCommands := checkVectorConstructor(_vhdrCommands); _errCommands != nil {
+		return nil, _errCommands
 	}
 	_cntCommands, _ecntCommands := r.ReadUint32()
 	if _ecntCommands != nil {
@@ -6380,9 +6734,12 @@ func DecodeUpdateBotCommands(r *Reader) (*UpdateBotCommands, error) {
 		if _errCommands != nil {
 			return nil, _errCommands
 		}
-		v.Commands[_iCommands] = _objCommands.(*BotCommand)
+		_cCommands, _okCommands := _objCommands.(*BotCommand)
+		if !_okCommands {
+			return nil, fmt.Errorf("decode: field commands: unexpected type %T", _objCommands)
+		}
+		v.Commands[_iCommands] = _cCommands
 	}
-	_ = _vhdrCommands
 	return v, nil
 }
 
@@ -6422,7 +6779,11 @@ func DecodeUpdatePendingJoinRequests(r *Reader) (*UpdatePendingJoinRequests, err
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rRequestsPending, _eRequestsPending := r.ReadInt32()
 	if _eRequestsPending != nil {
 		return nil, _eRequestsPending
@@ -6488,16 +6849,20 @@ func (v *UpdateBotChatInviteRequester) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotChatInviteRequester deserializes a UpdateBotChatInviteRequester from a reader using the TL binary protocol.
 func DecodeUpdateBotChatInviteRequester(r *Reader) (*UpdateBotChatInviteRequester, error) {
 	v := &UpdateBotChatInviteRequester{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -6517,7 +6882,11 @@ func DecodeUpdateBotChatInviteRequester(r *Reader) (*UpdateBotChatInviteRequeste
 	if _errInvite != nil {
 		return nil, _errInvite
 	}
-	v.Invite = _objInvite.(ExportedChatInviteClass)
+	_cInvite, _okInvite := _objInvite.(ExportedChatInviteClass)
+	if !_okInvite {
+		return nil, fmt.Errorf("decode: field invite: unexpected type %T", _objInvite)
+	}
+	v.Invite = _cInvite
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
 		return nil, _eQts
@@ -6586,16 +6955,20 @@ func (v *UpdateMessageReactions) Encode(b *bytes.Buffer) error {
 // DecodeUpdateMessageReactions deserializes a UpdateMessageReactions from a reader using the TL binary protocol.
 func DecodeUpdateMessageReactions(r *Reader) (*UpdateMessageReactions, error) {
 	v := &UpdateMessageReactions{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -6613,13 +6986,21 @@ func DecodeUpdateMessageReactions(r *Reader) (*UpdateMessageReactions, error) {
 		if _errSavedPeerID != nil {
 			return nil, _errSavedPeerID
 		}
-		v.SavedPeerID = _objSavedPeerID.(PeerClass)
+		_cSavedPeerID, _okSavedPeerID := _objSavedPeerID.(PeerClass)
+		if !_okSavedPeerID {
+			return nil, fmt.Errorf("decode: field saved_peer_id: unexpected type %T", _objSavedPeerID)
+		}
+		v.SavedPeerID = _cSavedPeerID
 	}
 	_objReactions, _errReactions := ReadTLObject(r)
 	if _errReactions != nil {
 		return nil, _errReactions
 	}
-	v.Reactions = _objReactions.(*MessageReactions)
+	_cReactions, _okReactions := _objReactions.(*MessageReactions)
+	if !_okReactions {
+		return nil, fmt.Errorf("decode: field reactions: unexpected type %T", _objReactions)
+	}
+	v.Reactions = _cReactions
 	return v, nil
 }
 
@@ -6727,7 +7108,11 @@ func DecodeUpdateBotMenuButton(r *Reader) (*UpdateBotMenuButton, error) {
 	if _errButton != nil {
 		return nil, _errButton
 	}
-	v.Button = _objButton.(BotMenuButtonClass)
+	_cButton, _okButton := _objButton.(BotMenuButtonClass)
+	if !_okButton {
+		return nil, fmt.Errorf("decode: field button: unexpected type %T", _objButton)
+	}
+	v.Button = _cButton
 	return v, nil
 }
 
@@ -6805,17 +7190,21 @@ func (v *UpdateTranscribedAudio) Encode(b *bytes.Buffer) error {
 // DecodeUpdateTranscribedAudio deserializes a UpdateTranscribedAudio from a reader using the TL binary protocol.
 func DecodeUpdateTranscribedAudio(r *Reader) (*UpdateTranscribedAudio, error) {
 	v := &UpdateTranscribedAudio{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Pending = v.Flags.Has(0)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -6902,7 +7291,11 @@ func DecodeUpdateUserEmojiStatus(r *Reader) (*UpdateUserEmojiStatus, error) {
 	if _errEmojiStatus != nil {
 		return nil, _errEmojiStatus
 	}
-	v.EmojiStatus = _objEmojiStatus.(EmojiStatusClass)
+	_cEmojiStatus, _okEmojiStatus := _objEmojiStatus.(EmojiStatusClass)
+	if !_okEmojiStatus {
+		return nil, fmt.Errorf("decode: field emoji_status: unexpected type %T", _objEmojiStatus)
+	}
+	v.EmojiStatus = _cEmojiStatus
 	return v, nil
 }
 
@@ -7007,11 +7400,11 @@ func (v *UpdateMoveStickerSetToTop) Encode(b *bytes.Buffer) error {
 // DecodeUpdateMoveStickerSetToTop deserializes a UpdateMoveStickerSetToTop from a reader using the TL binary protocol.
 func DecodeUpdateMoveStickerSetToTop(r *Reader) (*UpdateMoveStickerSetToTop, error) {
 	v := &UpdateMoveStickerSetToTop{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Masks = v.Flags.Has(0)
 	v.Emojis = v.Flags.Has(1)
 	_rStickerset, _eStickerset := r.ReadInt64()
@@ -7062,7 +7455,11 @@ func DecodeUpdateMessageExtendedMedia(r *Reader) (*UpdateMessageExtendedMedia, e
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -7071,6 +7468,9 @@ func DecodeUpdateMessageExtendedMedia(r *Reader) (*UpdateMessageExtendedMedia, e
 	_vhdrExtendedMedia, _ehdrExtendedMedia := r.ReadUint32()
 	if _ehdrExtendedMedia != nil {
 		return nil, _ehdrExtendedMedia
+	}
+	if _errExtendedMedia := checkVectorConstructor(_vhdrExtendedMedia); _errExtendedMedia != nil {
+		return nil, _errExtendedMedia
 	}
 	_cntExtendedMedia, _ecntExtendedMedia := r.ReadUint32()
 	if _ecntExtendedMedia != nil {
@@ -7085,9 +7485,12 @@ func DecodeUpdateMessageExtendedMedia(r *Reader) (*UpdateMessageExtendedMedia, e
 		if _errExtendedMedia != nil {
 			return nil, _errExtendedMedia
 		}
-		v.ExtendedMedia[_iExtendedMedia] = _objExtendedMedia.(MessageExtendedMediaClass)
+		_cExtendedMedia, _okExtendedMedia := _objExtendedMedia.(MessageExtendedMediaClass)
+		if !_okExtendedMedia {
+			return nil, fmt.Errorf("decode: field extended_media: unexpected type %T", _objExtendedMedia)
+		}
+		v.ExtendedMedia[_iExtendedMedia] = _cExtendedMedia
 	}
-	_ = _vhdrExtendedMedia
 	return v, nil
 }
 
@@ -7190,12 +7593,20 @@ func DecodeUpdateStory(r *Reader) (*UpdateStory, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objStory, _errStory := ReadTLObject(r)
 	if _errStory != nil {
 		return nil, _errStory
 	}
-	v.Story = _objStory.(StoryItemClass)
+	_cStory, _okStory := _objStory.(StoryItemClass)
+	if !_okStory {
+		return nil, fmt.Errorf("decode: field story: unexpected type %T", _objStory)
+	}
+	v.Story = _cStory
 	return v, nil
 }
 
@@ -7233,7 +7644,11 @@ func DecodeUpdateReadStories(r *Reader) (*UpdateReadStories, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMaxID, _eMaxID := r.ReadInt32()
 	if _eMaxID != nil {
 		return nil, _eMaxID
@@ -7317,7 +7732,11 @@ func DecodeUpdateStoriesStealthMode(r *Reader) (*UpdateStoriesStealthMode, error
 	if _errStealthMode != nil {
 		return nil, _errStealthMode
 	}
-	v.StealthMode = _objStealthMode.(*StoriesStealthMode)
+	_cStealthMode, _okStealthMode := _objStealthMode.(*StoriesStealthMode)
+	if !_okStealthMode {
+		return nil, fmt.Errorf("decode: field stealth_mode: unexpected type %T", _objStealthMode)
+	}
+	v.StealthMode = _cStealthMode
 	return v, nil
 }
 
@@ -7357,7 +7776,11 @@ func DecodeUpdateSentStoryReaction(r *Reader) (*UpdateSentStoryReaction, error) 
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rStoryID, _eStoryID := r.ReadInt32()
 	if _eStoryID != nil {
 		return nil, _eStoryID
@@ -7367,7 +7790,11 @@ func DecodeUpdateSentStoryReaction(r *Reader) (*UpdateSentStoryReaction, error) 
 	if _errReaction != nil {
 		return nil, _errReaction
 	}
-	v.Reaction = _objReaction.(ReactionClass)
+	_cReaction, _okReaction := _objReaction.(ReactionClass)
+	if !_okReaction {
+		return nil, fmt.Errorf("decode: field reaction: unexpected type %T", _objReaction)
+	}
+	v.Reaction = _cReaction
 	return v, nil
 }
 
@@ -7407,12 +7834,20 @@ func DecodeUpdateBotChatBoost(r *Reader) (*UpdateBotChatBoost, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objBoost, _errBoost := ReadTLObject(r)
 	if _errBoost != nil {
 		return nil, _errBoost
 	}
-	v.Boost = _objBoost.(*Boost)
+	_cBoost, _okBoost := _objBoost.(*Boost)
+	if !_okBoost {
+		return nil, fmt.Errorf("decode: field boost: unexpected type %T", _objBoost)
+	}
+	v.Boost = _cBoost
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
 		return nil, _eQts
@@ -7510,23 +7945,31 @@ func (v *UpdatePeerWallpaper) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePeerWallpaper deserializes a UpdatePeerWallpaper from a reader using the TL binary protocol.
 func DecodeUpdatePeerWallpaper(r *Reader) (*UpdatePeerWallpaper, error) {
 	v := &UpdatePeerWallpaper{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.WallpaperOverridden = v.Flags.Has(1)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(0) {
 		_objWallpaper, _errWallpaper := ReadTLObject(r)
 		if _errWallpaper != nil {
 			return nil, _errWallpaper
 		}
-		v.Wallpaper = _objWallpaper.(WallPaperClass)
+		_cWallpaper, _okWallpaper := _objWallpaper.(WallPaperClass)
+		if !_okWallpaper {
+			return nil, fmt.Errorf("decode: field wallpaper: unexpected type %T", _objWallpaper)
+		}
+		v.Wallpaper = _cWallpaper
 	}
 	return v, nil
 }
@@ -7583,7 +8026,11 @@ func DecodeUpdateBotMessageReaction(r *Reader) (*UpdateBotMessageReaction, error
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -7598,10 +8045,17 @@ func DecodeUpdateBotMessageReaction(r *Reader) (*UpdateBotMessageReaction, error
 	if _errActor != nil {
 		return nil, _errActor
 	}
-	v.Actor = _objActor.(PeerClass)
+	_cActor, _okActor := _objActor.(PeerClass)
+	if !_okActor {
+		return nil, fmt.Errorf("decode: field actor: unexpected type %T", _objActor)
+	}
+	v.Actor = _cActor
 	_vhdrOldReactions, _ehdrOldReactions := r.ReadUint32()
 	if _ehdrOldReactions != nil {
 		return nil, _ehdrOldReactions
+	}
+	if _errOldReactions := checkVectorConstructor(_vhdrOldReactions); _errOldReactions != nil {
+		return nil, _errOldReactions
 	}
 	_cntOldReactions, _ecntOldReactions := r.ReadUint32()
 	if _ecntOldReactions != nil {
@@ -7616,12 +8070,18 @@ func DecodeUpdateBotMessageReaction(r *Reader) (*UpdateBotMessageReaction, error
 		if _errOldReactions != nil {
 			return nil, _errOldReactions
 		}
-		v.OldReactions[_iOldReactions] = _objOldReactions.(ReactionClass)
+		_cOldReactions, _okOldReactions := _objOldReactions.(ReactionClass)
+		if !_okOldReactions {
+			return nil, fmt.Errorf("decode: field old_reactions: unexpected type %T", _objOldReactions)
+		}
+		v.OldReactions[_iOldReactions] = _cOldReactions
 	}
-	_ = _vhdrOldReactions
 	_vhdrNewReactions, _ehdrNewReactions := r.ReadUint32()
 	if _ehdrNewReactions != nil {
 		return nil, _ehdrNewReactions
+	}
+	if _errNewReactions := checkVectorConstructor(_vhdrNewReactions); _errNewReactions != nil {
+		return nil, _errNewReactions
 	}
 	_cntNewReactions, _ecntNewReactions := r.ReadUint32()
 	if _ecntNewReactions != nil {
@@ -7636,9 +8096,12 @@ func DecodeUpdateBotMessageReaction(r *Reader) (*UpdateBotMessageReaction, error
 		if _errNewReactions != nil {
 			return nil, _errNewReactions
 		}
-		v.NewReactions[_iNewReactions] = _objNewReactions.(ReactionClass)
+		_cNewReactions, _okNewReactions := _objNewReactions.(ReactionClass)
+		if !_okNewReactions {
+			return nil, fmt.Errorf("decode: field new_reactions: unexpected type %T", _objNewReactions)
+		}
+		v.NewReactions[_iNewReactions] = _cNewReactions
 	}
-	_ = _vhdrNewReactions
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
 		return nil, _eQts
@@ -7691,7 +8154,11 @@ func DecodeUpdateBotMessageReactions(r *Reader) (*UpdateBotMessageReactions, err
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -7706,6 +8173,9 @@ func DecodeUpdateBotMessageReactions(r *Reader) (*UpdateBotMessageReactions, err
 	if _ehdrReactions != nil {
 		return nil, _ehdrReactions
 	}
+	if _errReactions := checkVectorConstructor(_vhdrReactions); _errReactions != nil {
+		return nil, _errReactions
+	}
 	_cntReactions, _ecntReactions := r.ReadUint32()
 	if _ecntReactions != nil {
 		return nil, _ecntReactions
@@ -7719,9 +8189,12 @@ func DecodeUpdateBotMessageReactions(r *Reader) (*UpdateBotMessageReactions, err
 		if _errReactions != nil {
 			return nil, _errReactions
 		}
-		v.Reactions[_iReactions] = _objReactions.(*ReactionCount)
+		_cReactions, _okReactions := _objReactions.(*ReactionCount)
+		if !_okReactions {
+			return nil, fmt.Errorf("decode: field reactions: unexpected type %T", _objReactions)
+		}
+		v.Reactions[_iReactions] = _cReactions
 	}
-	_ = _vhdrReactions
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
 		return nil, _eQts
@@ -7769,17 +8242,21 @@ func (v *UpdateSavedDialogPinned) Encode(b *bytes.Buffer) error {
 // DecodeUpdateSavedDialogPinned deserializes a UpdateSavedDialogPinned from a reader using the TL binary protocol.
 func DecodeUpdateSavedDialogPinned(r *Reader) (*UpdateSavedDialogPinned, error) {
 	v := &UpdateSavedDialogPinned{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Pinned = v.Flags.Has(0)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(DialogPeerClass)
+	_cPeer, _okPeer := _objPeer.(DialogPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	return v, nil
 }
 
@@ -7827,15 +8304,18 @@ func (v *UpdatePinnedSavedDialogs) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePinnedSavedDialogs deserializes a UpdatePinnedSavedDialogs from a reader using the TL binary protocol.
 func DecodeUpdatePinnedSavedDialogs(r *Reader) (*UpdatePinnedSavedDialogs, error) {
 	v := &UpdatePinnedSavedDialogs{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_vhdrOrder, _ehdrOrder := r.ReadUint32()
 		if _ehdrOrder != nil {
 			return nil, _ehdrOrder
+		}
+		if _errOrder := checkVectorConstructor(_vhdrOrder); _errOrder != nil {
+			return nil, _errOrder
 		}
 		_cntOrder, _ecntOrder := r.ReadUint32()
 		if _ecntOrder != nil {
@@ -7850,9 +8330,12 @@ func DecodeUpdatePinnedSavedDialogs(r *Reader) (*UpdatePinnedSavedDialogs, error
 			if _errOrder != nil {
 				return nil, _errOrder
 			}
-			v.Order[_iOrder] = _objOrder.(DialogPeerClass)
+			_cOrder, _okOrder := _objOrder.(DialogPeerClass)
+			if !_okOrder {
+				return nil, fmt.Errorf("decode: field order: unexpected type %T", _objOrder)
+			}
+			v.Order[_iOrder] = _cOrder
 		}
-		_ = _vhdrOrder
 	}
 	return v, nil
 }
@@ -7958,6 +8441,9 @@ func DecodeUpdateQuickReplies(r *Reader) (*UpdateQuickReplies, error) {
 	if _ehdrQuickReplies != nil {
 		return nil, _ehdrQuickReplies
 	}
+	if _errQuickReplies := checkVectorConstructor(_vhdrQuickReplies); _errQuickReplies != nil {
+		return nil, _errQuickReplies
+	}
 	_cntQuickReplies, _ecntQuickReplies := r.ReadUint32()
 	if _ecntQuickReplies != nil {
 		return nil, _ecntQuickReplies
@@ -7971,9 +8457,12 @@ func DecodeUpdateQuickReplies(r *Reader) (*UpdateQuickReplies, error) {
 		if _errQuickReplies != nil {
 			return nil, _errQuickReplies
 		}
-		v.QuickReplies[_iQuickReplies] = _objQuickReplies.(*QuickReply)
+		_cQuickReplies, _okQuickReplies := _objQuickReplies.(*QuickReply)
+		if !_okQuickReplies {
+			return nil, fmt.Errorf("decode: field quick_replies: unexpected type %T", _objQuickReplies)
+		}
+		v.QuickReplies[_iQuickReplies] = _cQuickReplies
 	}
-	_ = _vhdrQuickReplies
 	return v, nil
 }
 
@@ -8009,7 +8498,11 @@ func DecodeUpdateNewQuickReply(r *Reader) (*UpdateNewQuickReply, error) {
 	if _errQuickReply != nil {
 		return nil, _errQuickReply
 	}
-	v.QuickReply = _objQuickReply.(*QuickReply)
+	_cQuickReply, _okQuickReply := _objQuickReply.(*QuickReply)
+	if !_okQuickReply {
+		return nil, fmt.Errorf("decode: field quick_reply: unexpected type %T", _objQuickReply)
+	}
+	v.QuickReply = _cQuickReply
 	return v, nil
 }
 
@@ -8081,7 +8574,11 @@ func DecodeUpdateQuickReplyMessage(r *Reader) (*UpdateQuickReplyMessage, error) 
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	return v, nil
 }
 
@@ -8162,7 +8659,11 @@ func DecodeUpdateBotBusinessConnect(r *Reader) (*UpdateBotBusinessConnect, error
 	if _errConnection != nil {
 		return nil, _errConnection
 	}
-	v.Connection = _objConnection.(*BotBusinessConnection)
+	_cConnection, _okConnection := _objConnection.(*BotBusinessConnection)
+	if !_okConnection {
+		return nil, fmt.Errorf("decode: field connection: unexpected type %T", _objConnection)
+	}
+	v.Connection = _cConnection
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
 		return nil, _eQts
@@ -8217,11 +8718,11 @@ func (v *UpdateBotNewBusinessMessage) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotNewBusinessMessage deserializes a UpdateBotNewBusinessMessage from a reader using the TL binary protocol.
 func DecodeUpdateBotNewBusinessMessage(r *Reader) (*UpdateBotNewBusinessMessage, error) {
 	v := &UpdateBotNewBusinessMessage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rConnectionID, _eConnectionID := r.ReadString()
 	if _eConnectionID != nil {
 		return nil, _eConnectionID
@@ -8231,13 +8732,21 @@ func DecodeUpdateBotNewBusinessMessage(r *Reader) (*UpdateBotNewBusinessMessage,
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	if v.Flags.Has(0) {
 		_objReplyToMessage, _errReplyToMessage := ReadTLObject(r)
 		if _errReplyToMessage != nil {
 			return nil, _errReplyToMessage
 		}
-		v.ReplyToMessage = _objReplyToMessage.(MessageClass)
+		_cReplyToMessage, _okReplyToMessage := _objReplyToMessage.(MessageClass)
+		if !_okReplyToMessage {
+			return nil, fmt.Errorf("decode: field reply_to_message: unexpected type %T", _objReplyToMessage)
+		}
+		v.ReplyToMessage = _cReplyToMessage
 	}
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
@@ -8293,11 +8802,11 @@ func (v *UpdateBotEditBusinessMessage) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotEditBusinessMessage deserializes a UpdateBotEditBusinessMessage from a reader using the TL binary protocol.
 func DecodeUpdateBotEditBusinessMessage(r *Reader) (*UpdateBotEditBusinessMessage, error) {
 	v := &UpdateBotEditBusinessMessage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rConnectionID, _eConnectionID := r.ReadString()
 	if _eConnectionID != nil {
 		return nil, _eConnectionID
@@ -8307,13 +8816,21 @@ func DecodeUpdateBotEditBusinessMessage(r *Reader) (*UpdateBotEditBusinessMessag
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	if v.Flags.Has(0) {
 		_objReplyToMessage, _errReplyToMessage := ReadTLObject(r)
 		if _errReplyToMessage != nil {
 			return nil, _errReplyToMessage
 		}
-		v.ReplyToMessage = _objReplyToMessage.(MessageClass)
+		_cReplyToMessage, _okReplyToMessage := _objReplyToMessage.(MessageClass)
+		if !_okReplyToMessage {
+			return nil, fmt.Errorf("decode: field reply_to_message: unexpected type %T", _objReplyToMessage)
+		}
+		v.ReplyToMessage = _cReplyToMessage
 	}
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
@@ -8366,7 +8883,11 @@ func DecodeUpdateBotDeleteBusinessMessage(r *Reader) (*UpdateBotDeleteBusinessMe
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_vvMessages, _veMessages := r.ReadVectorInt()
 	if _veMessages != nil {
 		return nil, _veMessages
@@ -8421,12 +8942,20 @@ func DecodeUpdateNewStoryReaction(r *Reader) (*UpdateNewStoryReaction, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objReaction, _errReaction := ReadTLObject(r)
 	if _errReaction != nil {
 		return nil, _errReaction
 	}
-	v.Reaction = _objReaction.(ReactionClass)
+	_cReaction, _okReaction := _objReaction.(ReactionClass)
+	if !_okReaction {
+		return nil, fmt.Errorf("decode: field reaction: unexpected type %T", _objReaction)
+	}
+	v.Reaction = _cReaction
 	return v, nil
 }
 
@@ -8462,7 +8991,11 @@ func DecodeUpdateStarsBalance(r *Reader) (*UpdateStarsBalance, error) {
 	if _errBalance != nil {
 		return nil, _errBalance
 	}
-	v.Balance = _objBalance.(StarsAmountClass)
+	_cBalance, _okBalance := _objBalance.(StarsAmountClass)
+	if !_okBalance {
+		return nil, fmt.Errorf("decode: field balance: unexpected type %T", _objBalance)
+	}
+	v.Balance = _cBalance
 	return v, nil
 }
 
@@ -8523,11 +9056,11 @@ func (v *UpdateBusinessBotCallbackQuery) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBusinessBotCallbackQuery deserializes a UpdateBusinessBotCallbackQuery from a reader using the TL binary protocol.
 func DecodeUpdateBusinessBotCallbackQuery(r *Reader) (*UpdateBusinessBotCallbackQuery, error) {
 	v := &UpdateBusinessBotCallbackQuery{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -8547,13 +9080,21 @@ func DecodeUpdateBusinessBotCallbackQuery(r *Reader) (*UpdateBusinessBotCallback
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	if v.Flags.Has(2) {
 		_objReplyToMessage, _errReplyToMessage := ReadTLObject(r)
 		if _errReplyToMessage != nil {
 			return nil, _errReplyToMessage
 		}
-		v.ReplyToMessage = _objReplyToMessage.(MessageClass)
+		_cReplyToMessage, _okReplyToMessage := _objReplyToMessage.(MessageClass)
+		if !_okReplyToMessage {
+			return nil, fmt.Errorf("decode: field reply_to_message: unexpected type %T", _objReplyToMessage)
+		}
+		v.ReplyToMessage = _cReplyToMessage
 	}
 	_rChatInstance, _eChatInstance := r.ReadInt64()
 	if _eChatInstance != nil {
@@ -8604,12 +9145,20 @@ func DecodeUpdateStarsRevenueStatus(r *Reader) (*UpdateStarsRevenueStatus, error
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objStatus, _errStatus := ReadTLObject(r)
 	if _errStatus != nil {
 		return nil, _errStatus
 	}
-	v.Status = _objStatus.(*StarsRevenueStatus)
+	_cStatus, _okStatus := _objStatus.(*StarsRevenueStatus)
+	if !_okStatus {
+		return nil, fmt.Errorf("decode: field status: unexpected type %T", _objStatus)
+	}
+	v.Status = _cStatus
 	return v, nil
 }
 
@@ -8695,7 +9244,11 @@ func DecodeUpdatePaidReactionPrivacy(r *Reader) (*UpdatePaidReactionPrivacy, err
 	if _errPrivate != nil {
 		return nil, _errPrivate
 	}
-	v.Private = _objPrivate.(PaidReactionPrivacyClass)
+	_cPrivate, _okPrivate := _objPrivate.(PaidReactionPrivacyClass)
+	if !_okPrivate {
+		return nil, fmt.Errorf("decode: field private: unexpected type %T", _objPrivate)
+	}
+	v.Private = _cPrivate
 	return v, nil
 }
 
@@ -8731,7 +9284,11 @@ func DecodeUpdateSentPhoneCode(r *Reader) (*UpdateSentPhoneCode, error) {
 	if _errSentCode != nil {
 		return nil, _errSentCode
 	}
-	v.SentCode = _objSentCode.(SentCodeClass)
+	_cSentCode, _okSentCode := _objSentCode.(SentCodeClass)
+	if !_okSentCode {
+		return nil, fmt.Errorf("decode: field sent_code: unexpected type %T", _objSentCode)
+	}
+	v.SentCode = _cSentCode
 	return v, nil
 }
 
@@ -8773,7 +9330,11 @@ func DecodeUpdateGroupCallChainBlocks(r *Reader) (*UpdateGroupCallChainBlocks, e
 	if _errCall != nil {
 		return nil, _errCall
 	}
-	v.Call = _objCall.(InputGroupCallClass)
+	_cCall, _okCall := _objCall.(InputGroupCallClass)
+	if !_okCall {
+		return nil, fmt.Errorf("decode: field call: unexpected type %T", _objCall)
+	}
+	v.Call = _cCall
 	_rSubChainID, _eSubChainID := r.ReadInt32()
 	if _eSubChainID != nil {
 		return nil, _eSubChainID
@@ -8833,7 +9394,11 @@ func DecodeUpdateReadMonoForumInbox(r *Reader) (*UpdateReadMonoForumInbox, error
 	if _errSavedPeerID != nil {
 		return nil, _errSavedPeerID
 	}
-	v.SavedPeerID = _objSavedPeerID.(PeerClass)
+	_cSavedPeerID, _okSavedPeerID := _objSavedPeerID.(PeerClass)
+	if !_okSavedPeerID {
+		return nil, fmt.Errorf("decode: field saved_peer_id: unexpected type %T", _objSavedPeerID)
+	}
+	v.SavedPeerID = _cSavedPeerID
 	_rReadMaxID, _eReadMaxID := r.ReadInt32()
 	if _eReadMaxID != nil {
 		return nil, _eReadMaxID
@@ -8883,7 +9448,11 @@ func DecodeUpdateReadMonoForumOutbox(r *Reader) (*UpdateReadMonoForumOutbox, err
 	if _errSavedPeerID != nil {
 		return nil, _errSavedPeerID
 	}
-	v.SavedPeerID = _objSavedPeerID.(PeerClass)
+	_cSavedPeerID, _okSavedPeerID := _objSavedPeerID.(PeerClass)
+	if !_okSavedPeerID {
+		return nil, fmt.Errorf("decode: field saved_peer_id: unexpected type %T", _objSavedPeerID)
+	}
+	v.SavedPeerID = _cSavedPeerID
 	_rReadMaxID, _eReadMaxID := r.ReadInt32()
 	if _eReadMaxID != nil {
 		return nil, _eReadMaxID
@@ -8933,11 +9502,11 @@ func (v *UpdateMonoForumNoPaidException) Encode(b *bytes.Buffer) error {
 // DecodeUpdateMonoForumNoPaidException deserializes a UpdateMonoForumNoPaidException from a reader using the TL binary protocol.
 func DecodeUpdateMonoForumNoPaidException(r *Reader) (*UpdateMonoForumNoPaidException, error) {
 	v := &UpdateMonoForumNoPaidException{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Exception = v.Flags.Has(0)
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
@@ -8948,7 +9517,11 @@ func DecodeUpdateMonoForumNoPaidException(r *Reader) (*UpdateMonoForumNoPaidExce
 	if _errSavedPeerID != nil {
 		return nil, _errSavedPeerID
 	}
-	v.SavedPeerID = _objSavedPeerID.(PeerClass)
+	_cSavedPeerID, _okSavedPeerID := _objSavedPeerID.(PeerClass)
+	if !_okSavedPeerID {
+		return nil, fmt.Errorf("decode: field saved_peer_id: unexpected type %T", _objSavedPeerID)
+	}
+	v.SavedPeerID = _cSavedPeerID
 	return v, nil
 }
 
@@ -8986,12 +9559,20 @@ func DecodeUpdateGroupCallMessage(r *Reader) (*UpdateGroupCallMessage, error) {
 	if _errCall != nil {
 		return nil, _errCall
 	}
-	v.Call = _objCall.(InputGroupCallClass)
+	_cCall, _okCall := _objCall.(InputGroupCallClass)
+	if !_okCall {
+		return nil, fmt.Errorf("decode: field call: unexpected type %T", _objCall)
+	}
+	v.Call = _cCall
 	_objMessage, _errMessage := ReadTLObject(r)
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(*GroupCallMessage)
+	_cMessage, _okMessage := _objMessage.(*GroupCallMessage)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	return v, nil
 }
 
@@ -9031,12 +9612,20 @@ func DecodeUpdateGroupCallEncryptedMessage(r *Reader) (*UpdateGroupCallEncrypted
 	if _errCall != nil {
 		return nil, _errCall
 	}
-	v.Call = _objCall.(InputGroupCallClass)
+	_cCall, _okCall := _objCall.(InputGroupCallClass)
+	if !_okCall {
+		return nil, fmt.Errorf("decode: field call: unexpected type %T", _objCall)
+	}
+	v.Call = _cCall
 	_objFromID, _errFromID := ReadTLObject(r)
 	if _errFromID != nil {
 		return nil, _errFromID
 	}
-	v.FromID = _objFromID.(PeerClass)
+	_cFromID, _okFromID := _objFromID.(PeerClass)
+	if !_okFromID {
+		return nil, fmt.Errorf("decode: field from_id: unexpected type %T", _objFromID)
+	}
+	v.FromID = _cFromID
 	_rEncryptedMessage, _eEncryptedMessage := r.ReadBytes()
 	if _eEncryptedMessage != nil {
 		return nil, _eEncryptedMessage
@@ -9086,17 +9675,21 @@ func (v *UpdatePinnedForumTopic) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePinnedForumTopic deserializes a UpdatePinnedForumTopic from a reader using the TL binary protocol.
 func DecodeUpdatePinnedForumTopic(r *Reader) (*UpdatePinnedForumTopic, error) {
 	v := &UpdatePinnedForumTopic{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Pinned = v.Flags.Has(0)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rTopicID, _eTopicID := r.ReadInt32()
 	if _eTopicID != nil {
 		return nil, _eTopicID
@@ -9147,16 +9740,20 @@ func (v *UpdatePinnedForumTopics) Encode(b *bytes.Buffer) error {
 // DecodeUpdatePinnedForumTopics deserializes a UpdatePinnedForumTopics from a reader using the TL binary protocol.
 func DecodeUpdatePinnedForumTopics(r *Reader) (*UpdatePinnedForumTopics, error) {
 	v := &UpdatePinnedForumTopics{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(0) {
 		_vvOrder, _veOrder := r.ReadVectorInt()
 		if _veOrder != nil {
@@ -9201,7 +9798,11 @@ func DecodeUpdateDeleteGroupCallMessages(r *Reader) (*UpdateDeleteGroupCallMessa
 	if _errCall != nil {
 		return nil, _errCall
 	}
-	v.Call = _objCall.(InputGroupCallClass)
+	_cCall, _okCall := _objCall.(InputGroupCallClass)
+	if !_okCall {
+		return nil, fmt.Errorf("decode: field call: unexpected type %T", _objCall)
+	}
+	v.Call = _cCall
 	_vvMessages, _veMessages := r.ReadVectorInt()
 	if _veMessages != nil {
 		return nil, _veMessages
@@ -9249,7 +9850,11 @@ func DecodeUpdateStarGiftAuctionState(r *Reader) (*UpdateStarGiftAuctionState, e
 	if _errState != nil {
 		return nil, _errState
 	}
-	v.State = _objState.(StarGiftAuctionStateClass)
+	_cState, _okState := _objState.(StarGiftAuctionStateClass)
+	if !_okState {
+		return nil, fmt.Errorf("decode: field state: unexpected type %T", _objState)
+	}
+	v.State = _cState
 	return v, nil
 }
 
@@ -9292,7 +9897,11 @@ func DecodeUpdateStarGiftAuctionUserState(r *Reader) (*UpdateStarGiftAuctionUser
 	if _errUserState != nil {
 		return nil, _errUserState
 	}
-	v.UserState = _objUserState.(*StarGiftAuctionUserState)
+	_cUserState, _okUserState := _objUserState.(*StarGiftAuctionUserState)
+	if !_okUserState {
+		return nil, fmt.Errorf("decode: field user_state: unexpected type %T", _objUserState)
+	}
+	v.UserState = _cUserState
 	return v, nil
 }
 
@@ -9328,7 +9937,11 @@ func DecodeUpdateEmojiGameInfo(r *Reader) (*UpdateEmojiGameInfo, error) {
 	if _errInfo != nil {
 		return nil, _errInfo
 	}
-	v.Info = _objInfo.(EmojiGameInfoClass)
+	_cInfo, _okInfo := _objInfo.(EmojiGameInfoClass)
+	if !_okInfo {
+		return nil, fmt.Errorf("decode: field info: unexpected type %T", _objInfo)
+	}
+	v.Info = _cInfo
 	return v, nil
 }
 
@@ -9518,11 +10131,11 @@ func (v *UpdateBotGuestChatQuery) Encode(b *bytes.Buffer) error {
 // DecodeUpdateBotGuestChatQuery deserializes a UpdateBotGuestChatQuery from a reader using the TL binary protocol.
 func DecodeUpdateBotGuestChatQuery(r *Reader) (*UpdateBotGuestChatQuery, error) {
 	v := &UpdateBotGuestChatQuery{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -9532,11 +10145,18 @@ func DecodeUpdateBotGuestChatQuery(r *Reader) (*UpdateBotGuestChatQuery, error) 
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	if v.Flags.Has(0) {
 		_vhdrReferenceMessages, _ehdrReferenceMessages := r.ReadUint32()
 		if _ehdrReferenceMessages != nil {
 			return nil, _ehdrReferenceMessages
+		}
+		if _errReferenceMessages := checkVectorConstructor(_vhdrReferenceMessages); _errReferenceMessages != nil {
+			return nil, _errReferenceMessages
 		}
 		_cntReferenceMessages, _ecntReferenceMessages := r.ReadUint32()
 		if _ecntReferenceMessages != nil {
@@ -9551,9 +10171,12 @@ func DecodeUpdateBotGuestChatQuery(r *Reader) (*UpdateBotGuestChatQuery, error) 
 			if _errReferenceMessages != nil {
 				return nil, _errReferenceMessages
 			}
-			v.ReferenceMessages[_iReferenceMessages] = _objReferenceMessages.(MessageClass)
+			_cReferenceMessages, _okReferenceMessages := _objReferenceMessages.(MessageClass)
+			if !_okReferenceMessages {
+				return nil, fmt.Errorf("decode: field reference_messages: unexpected type %T", _objReferenceMessages)
+			}
+			v.ReferenceMessages[_iReferenceMessages] = _cReferenceMessages
 		}
-		_ = _vhdrReferenceMessages
 	}
 	_rQts, _eQts := r.ReadInt32()
 	if _eQts != nil {
@@ -9628,7 +10251,11 @@ func DecodeUpdateJoinChatWebViewDecision(r *Reader) (*UpdateJoinChatWebViewDecis
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -9638,7 +10265,11 @@ func DecodeUpdateJoinChatWebViewDecision(r *Reader) (*UpdateJoinChatWebViewDecis
 	if _errResult != nil {
 		return nil, _errResult
 	}
-	v.Result = _objResult.(JoinChatBotResultClass)
+	_cResult, _okResult := _objResult.(JoinChatBotResultClass)
+	if !_okResult {
+		return nil, fmt.Errorf("decode: field result: unexpected type %T", _objResult)
+	}
+	v.Result = _cResult
 	return v, nil
 }
 
@@ -9702,11 +10333,11 @@ func (v *UpdateNewBotConnection) Encode(b *bytes.Buffer) error {
 // DecodeUpdateNewBotConnection deserializes a UpdateNewBotConnection from a reader using the TL binary protocol.
 func DecodeUpdateNewBotConnection(r *Reader) (*UpdateNewBotConnection, error) {
 	v := &UpdateNewBotConnection{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Confirmed = v.Flags.Has(0)
 	_rBotID, _eBotID := r.ReadInt64()
 	if _eBotID != nil {
@@ -9778,11 +10409,11 @@ func (v *UpdateWebBrowserSettings) Encode(b *bytes.Buffer) error {
 // DecodeUpdateWebBrowserSettings deserializes a UpdateWebBrowserSettings from a reader using the TL binary protocol.
 func DecodeUpdateWebBrowserSettings(r *Reader) (*UpdateWebBrowserSettings, error) {
 	v := &UpdateWebBrowserSettings{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.OpenExternalBrowser = v.Flags.Has(0)
 	v.DisplayCloseButton = v.Flags.Has(1)
 	return v, nil
@@ -9852,11 +10483,11 @@ func (v *UpdateWebBrowserException) GetOpenExternalBrowser() (value bool, ok boo
 // DecodeUpdateWebBrowserException deserializes a UpdateWebBrowserException from a reader using the TL binary protocol.
 func DecodeUpdateWebBrowserException(r *Reader) (*UpdateWebBrowserException, error) {
 	v := &UpdateWebBrowserException{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Delete = v.Flags.Has(1)
 	if v.Flags.Has(0) {
 		_rOpenExternalBrowser, _eOpenExternalBrowser := r.ReadBool()
@@ -9869,13 +10500,333 @@ func DecodeUpdateWebBrowserException(r *Reader) (*UpdateWebBrowserException, err
 	if _errException != nil {
 		return nil, _errException
 	}
-	v.Exception = _objException.(*WebDomainException)
+	_cException, _okException := _objException.(*WebDomainException)
+	if !_okException {
+		return nil, fmt.Errorf("decode: field exception: unexpected type %T", _objException)
+	}
+	v.Exception = _cException
 	return v, nil
 }
 
 func init() {
 	Registry[UpdateWebBrowserExceptionTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeUpdateWebBrowserException(r)
+	}
+}
+
+// UpdateNewEphemeralMessage represents the TL constructor updateNewEphemeralMessage (0x20bcbba1).
+//
+// See https://core.telegram.org/constructor/updateNewEphemeralMessage for reference.
+type UpdateNewEphemeralMessage struct {
+	Message *EphemeralMessage `json:"message,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x20bcbba1.
+func (v *UpdateNewEphemeralMessage) ConstructorID() uint32 {
+	return UpdateNewEphemeralMessageTypeID
+}
+
+// Encode serializes UpdateNewEphemeralMessage to a bytes.Buffer using the TL binary protocol.
+func (v *UpdateNewEphemeralMessage) Encode(b *bytes.Buffer) error {
+	WriteInt(b, UpdateNewEphemeralMessageTypeID)
+	EncodeTLObject(b, v.Message)
+	return nil
+}
+
+// DecodeUpdateNewEphemeralMessage deserializes a UpdateNewEphemeralMessage from a reader using the TL binary protocol.
+func DecodeUpdateNewEphemeralMessage(r *Reader) (*UpdateNewEphemeralMessage, error) {
+	v := &UpdateNewEphemeralMessage{}
+	_objMessage, _errMessage := ReadTLObject(r)
+	if _errMessage != nil {
+		return nil, _errMessage
+	}
+	_cMessage, _okMessage := _objMessage.(*EphemeralMessage)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
+	return v, nil
+}
+
+func init() {
+	Registry[UpdateNewEphemeralMessageTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeUpdateNewEphemeralMessage(r)
+	}
+}
+
+// UpdateDeleteEphemeralMessages represents the TL constructor updateDeleteEphemeralMessages (0x56dbfcf8).
+//
+// See https://core.telegram.org/constructor/updateDeleteEphemeralMessages for reference.
+type UpdateDeleteEphemeralMessages struct {
+	Peer PeerClass `json:"peer,omitempty"`
+	Ids  []int32   `json:"ids,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x56dbfcf8.
+func (v *UpdateDeleteEphemeralMessages) ConstructorID() uint32 {
+	return UpdateDeleteEphemeralMessagesTypeID
+}
+
+// Encode serializes UpdateDeleteEphemeralMessages to a bytes.Buffer using the TL binary protocol.
+func (v *UpdateDeleteEphemeralMessages) Encode(b *bytes.Buffer) error {
+	WriteInt(b, UpdateDeleteEphemeralMessagesTypeID)
+	EncodeTLObject(b, v.Peer)
+	WriteVectorInt(b, v.Ids)
+	return nil
+}
+
+// DecodeUpdateDeleteEphemeralMessages deserializes a UpdateDeleteEphemeralMessages from a reader using the TL binary protocol.
+func DecodeUpdateDeleteEphemeralMessages(r *Reader) (*UpdateDeleteEphemeralMessages, error) {
+	v := &UpdateDeleteEphemeralMessages{}
+	_objPeer, _errPeer := ReadTLObject(r)
+	if _errPeer != nil {
+		return nil, _errPeer
+	}
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
+	_vvIds, _veIds := r.ReadVectorInt()
+	if _veIds != nil {
+		return nil, _veIds
+	}
+	v.Ids = _vvIds
+	return v, nil
+}
+
+func init() {
+	Registry[UpdateDeleteEphemeralMessagesTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeUpdateDeleteEphemeralMessages(r)
+	}
+}
+
+// UpdateEditEphemeralMessage represents the TL constructor updateEditEphemeralMessage (0x4bbb8f01).
+//
+// See https://core.telegram.org/constructor/updateEditEphemeralMessage for reference.
+type UpdateEditEphemeralMessage struct {
+	Message *EphemeralMessage `json:"message,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x4bbb8f01.
+func (v *UpdateEditEphemeralMessage) ConstructorID() uint32 {
+	return UpdateEditEphemeralMessageTypeID
+}
+
+// Encode serializes UpdateEditEphemeralMessage to a bytes.Buffer using the TL binary protocol.
+func (v *UpdateEditEphemeralMessage) Encode(b *bytes.Buffer) error {
+	WriteInt(b, UpdateEditEphemeralMessageTypeID)
+	EncodeTLObject(b, v.Message)
+	return nil
+}
+
+// DecodeUpdateEditEphemeralMessage deserializes a UpdateEditEphemeralMessage from a reader using the TL binary protocol.
+func DecodeUpdateEditEphemeralMessage(r *Reader) (*UpdateEditEphemeralMessage, error) {
+	v := &UpdateEditEphemeralMessage{}
+	_objMessage, _errMessage := ReadTLObject(r)
+	if _errMessage != nil {
+		return nil, _errMessage
+	}
+	_cMessage, _okMessage := _objMessage.(*EphemeralMessage)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
+	return v, nil
+}
+
+func init() {
+	Registry[UpdateEditEphemeralMessageTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeUpdateEditEphemeralMessage(r)
+	}
+}
+
+// UpdateEphemeralBotCallbackQuery represents the TL constructor updateEphemeralBotCallbackQuery (0x7c1079d6).
+//
+// See https://core.telegram.org/constructor/updateEphemeralBotCallbackQuery for reference.
+type UpdateEphemeralBotCallbackQuery struct {
+	Flags        Fields            `json:"-"`
+	QueryID      int64             `json:"query_id,omitempty"`
+	UserID       int64             `json:"user_id,omitempty"`
+	Peer         PeerClass         `json:"peer,omitempty"`
+	MsgID        int32             `json:"msg_id,omitempty"`
+	Data         []byte            `json:"data,omitempty"`
+	ChatInstance int64             `json:"chat_instance,omitempty"`
+	Message      *EphemeralMessage `json:"message,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *UpdateEphemeralBotCallbackQuery) SetFlags() {
+	if v.Peer != nil {
+		v.Flags.Set(0)
+	}
+	if v.ChatInstance != 0 {
+		v.Flags.Set(1)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x7c1079d6.
+func (v *UpdateEphemeralBotCallbackQuery) ConstructorID() uint32 {
+	return UpdateEphemeralBotCallbackQueryTypeID
+}
+
+// Encode serializes UpdateEphemeralBotCallbackQuery to a bytes.Buffer using the TL binary protocol.
+func (v *UpdateEphemeralBotCallbackQuery) Encode(b *bytes.Buffer) error {
+	WriteInt(b, UpdateEphemeralBotCallbackQueryTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteLong(b, v.QueryID)
+	WriteLong(b, v.UserID)
+	if v.Flags.Has(0) {
+		EncodeTLObject(b, v.Peer)
+	}
+	WriteInt(b, uint32(v.MsgID))
+	WriteBytes(b, v.Data)
+	if v.Flags.Has(1) {
+		WriteLong(b, v.ChatInstance)
+	}
+	EncodeTLObject(b, v.Message)
+	return nil
+}
+
+// DecodeUpdateEphemeralBotCallbackQuery deserializes a UpdateEphemeralBotCallbackQuery from a reader using the TL binary protocol.
+func DecodeUpdateEphemeralBotCallbackQuery(r *Reader) (*UpdateEphemeralBotCallbackQuery, error) {
+	v := &UpdateEphemeralBotCallbackQuery{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	_rQueryID, _eQueryID := r.ReadInt64()
+	if _eQueryID != nil {
+		return nil, _eQueryID
+	}
+	v.QueryID = _rQueryID
+	_rUserID, _eUserID := r.ReadInt64()
+	if _eUserID != nil {
+		return nil, _eUserID
+	}
+	v.UserID = _rUserID
+	if v.Flags.Has(0) {
+		_objPeer, _errPeer := ReadTLObject(r)
+		if _errPeer != nil {
+			return nil, _errPeer
+		}
+		_cPeer, _okPeer := _objPeer.(PeerClass)
+		if !_okPeer {
+			return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+		}
+		v.Peer = _cPeer
+	}
+	_rMsgID, _eMsgID := r.ReadInt32()
+	if _eMsgID != nil {
+		return nil, _eMsgID
+	}
+	v.MsgID = _rMsgID
+	_rData, _eData := r.ReadBytes()
+	if _eData != nil {
+		return nil, _eData
+	}
+	v.Data = _rData
+	if v.Flags.Has(1) {
+		_rChatInstance, _eChatInstance := r.ReadInt64()
+		if _eChatInstance != nil {
+			return nil, _eChatInstance
+		}
+		v.ChatInstance = _rChatInstance
+	}
+	_objMessage, _errMessage := ReadTLObject(r)
+	if _errMessage != nil {
+		return nil, _errMessage
+	}
+	_cMessage, _okMessage := _objMessage.(*EphemeralMessage)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
+	return v, nil
+}
+
+func init() {
+	Registry[UpdateEphemeralBotCallbackQueryTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeUpdateEphemeralBotCallbackQuery(r)
+	}
+}
+
+// UpdateBotStarsSubscription represents the TL constructor updateBotStarsSubscription (0x6c0d8e23).
+//
+// See https://core.telegram.org/constructor/updateBotStarsSubscription for reference.
+type UpdateBotStarsSubscription struct {
+	Flags         Fields `json:"-"`
+	Canceled      bool   `json:"canceled,omitempty"`
+	PaymentFailed bool   `json:"payment_failed,omitempty"`
+	Restored      bool   `json:"restored,omitempty"`
+	UserID        int64  `json:"user_id,omitempty"`
+	Payload       []byte `json:"payload,omitempty"`
+	Qts           int32  `json:"qts,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *UpdateBotStarsSubscription) SetFlags() {
+	if v.Canceled {
+		v.Flags.Set(0)
+	}
+	if v.PaymentFailed {
+		v.Flags.Set(1)
+	}
+	if v.Restored {
+		v.Flags.Set(2)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x6c0d8e23.
+func (v *UpdateBotStarsSubscription) ConstructorID() uint32 {
+	return UpdateBotStarsSubscriptionTypeID
+}
+
+// Encode serializes UpdateBotStarsSubscription to a bytes.Buffer using the TL binary protocol.
+func (v *UpdateBotStarsSubscription) Encode(b *bytes.Buffer) error {
+	WriteInt(b, UpdateBotStarsSubscriptionTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteLong(b, v.UserID)
+	WriteBytes(b, v.Payload)
+	WriteInt(b, uint32(v.Qts))
+	return nil
+}
+
+// DecodeUpdateBotStarsSubscription deserializes a UpdateBotStarsSubscription from a reader using the TL binary protocol.
+func DecodeUpdateBotStarsSubscription(r *Reader) (*UpdateBotStarsSubscription, error) {
+	v := &UpdateBotStarsSubscription{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.Canceled = v.Flags.Has(0)
+	v.PaymentFailed = v.Flags.Has(1)
+	v.Restored = v.Flags.Has(2)
+	_rUserID, _eUserID := r.ReadInt64()
+	if _eUserID != nil {
+		return nil, _eUserID
+	}
+	v.UserID = _rUserID
+	_rPayload, _ePayload := r.ReadBytes()
+	if _ePayload != nil {
+		return nil, _ePayload
+	}
+	v.Payload = _rPayload
+	_rQts, _eQts := r.ReadInt32()
+	if _eQts != nil {
+		return nil, _eQts
+	}
+	v.Qts = _rQts
+	return v, nil
+}
+
+func init() {
+	Registry[UpdateBotStarsSubscriptionTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeUpdateBotStarsSubscription(r)
 	}
 }
 
@@ -10077,6 +11028,9 @@ func DecodeUpdatesDifference(r *Reader) (*UpdatesDifference, error) {
 	if _ehdrNewMessages != nil {
 		return nil, _ehdrNewMessages
 	}
+	if _errNewMessages := checkVectorConstructor(_vhdrNewMessages); _errNewMessages != nil {
+		return nil, _errNewMessages
+	}
 	_cntNewMessages, _ecntNewMessages := r.ReadUint32()
 	if _ecntNewMessages != nil {
 		return nil, _ecntNewMessages
@@ -10090,12 +11044,18 @@ func DecodeUpdatesDifference(r *Reader) (*UpdatesDifference, error) {
 		if _errNewMessages != nil {
 			return nil, _errNewMessages
 		}
-		v.NewMessages[_iNewMessages] = _objNewMessages.(MessageClass)
+		_cNewMessages, _okNewMessages := _objNewMessages.(MessageClass)
+		if !_okNewMessages {
+			return nil, fmt.Errorf("decode: field new_messages: unexpected type %T", _objNewMessages)
+		}
+		v.NewMessages[_iNewMessages] = _cNewMessages
 	}
-	_ = _vhdrNewMessages
 	_vhdrNewEncryptedMessages, _ehdrNewEncryptedMessages := r.ReadUint32()
 	if _ehdrNewEncryptedMessages != nil {
 		return nil, _ehdrNewEncryptedMessages
+	}
+	if _errNewEncryptedMessages := checkVectorConstructor(_vhdrNewEncryptedMessages); _errNewEncryptedMessages != nil {
+		return nil, _errNewEncryptedMessages
 	}
 	_cntNewEncryptedMessages, _ecntNewEncryptedMessages := r.ReadUint32()
 	if _ecntNewEncryptedMessages != nil {
@@ -10110,12 +11070,18 @@ func DecodeUpdatesDifference(r *Reader) (*UpdatesDifference, error) {
 		if _errNewEncryptedMessages != nil {
 			return nil, _errNewEncryptedMessages
 		}
-		v.NewEncryptedMessages[_iNewEncryptedMessages] = _objNewEncryptedMessages.(EncryptedMessageClass)
+		_cNewEncryptedMessages, _okNewEncryptedMessages := _objNewEncryptedMessages.(EncryptedMessageClass)
+		if !_okNewEncryptedMessages {
+			return nil, fmt.Errorf("decode: field new_encrypted_messages: unexpected type %T", _objNewEncryptedMessages)
+		}
+		v.NewEncryptedMessages[_iNewEncryptedMessages] = _cNewEncryptedMessages
 	}
-	_ = _vhdrNewEncryptedMessages
 	_vhdrOtherUpdates, _ehdrOtherUpdates := r.ReadUint32()
 	if _ehdrOtherUpdates != nil {
 		return nil, _ehdrOtherUpdates
+	}
+	if _errOtherUpdates := checkVectorConstructor(_vhdrOtherUpdates); _errOtherUpdates != nil {
+		return nil, _errOtherUpdates
 	}
 	_cntOtherUpdates, _ecntOtherUpdates := r.ReadUint32()
 	if _ecntOtherUpdates != nil {
@@ -10130,12 +11096,18 @@ func DecodeUpdatesDifference(r *Reader) (*UpdatesDifference, error) {
 		if _errOtherUpdates != nil {
 			return nil, _errOtherUpdates
 		}
-		v.OtherUpdates[_iOtherUpdates] = _objOtherUpdates.(UpdateClass)
+		_cOtherUpdates, _okOtherUpdates := _objOtherUpdates.(UpdateClass)
+		if !_okOtherUpdates {
+			return nil, fmt.Errorf("decode: field other_updates: unexpected type %T", _objOtherUpdates)
+		}
+		v.OtherUpdates[_iOtherUpdates] = _cOtherUpdates
 	}
-	_ = _vhdrOtherUpdates
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -10150,12 +11122,18 @@ func DecodeUpdatesDifference(r *Reader) (*UpdatesDifference, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -10170,14 +11148,21 @@ func DecodeUpdatesDifference(r *Reader) (*UpdatesDifference, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_objState, _errState := ReadTLObject(r)
 	if _errState != nil {
 		return nil, _errState
 	}
-	v.State = _objState.(*UpdatesState)
+	_cState, _okState := _objState.(*UpdatesState)
+	if !_okState {
+		return nil, fmt.Errorf("decode: field state: unexpected type %T", _objState)
+	}
+	v.State = _cState
 	return v, nil
 }
 
@@ -10243,6 +11228,9 @@ func DecodeUpdatesDifferenceSlice(r *Reader) (*UpdatesDifferenceSlice, error) {
 	if _ehdrNewMessages != nil {
 		return nil, _ehdrNewMessages
 	}
+	if _errNewMessages := checkVectorConstructor(_vhdrNewMessages); _errNewMessages != nil {
+		return nil, _errNewMessages
+	}
 	_cntNewMessages, _ecntNewMessages := r.ReadUint32()
 	if _ecntNewMessages != nil {
 		return nil, _ecntNewMessages
@@ -10256,12 +11244,18 @@ func DecodeUpdatesDifferenceSlice(r *Reader) (*UpdatesDifferenceSlice, error) {
 		if _errNewMessages != nil {
 			return nil, _errNewMessages
 		}
-		v.NewMessages[_iNewMessages] = _objNewMessages.(MessageClass)
+		_cNewMessages, _okNewMessages := _objNewMessages.(MessageClass)
+		if !_okNewMessages {
+			return nil, fmt.Errorf("decode: field new_messages: unexpected type %T", _objNewMessages)
+		}
+		v.NewMessages[_iNewMessages] = _cNewMessages
 	}
-	_ = _vhdrNewMessages
 	_vhdrNewEncryptedMessages, _ehdrNewEncryptedMessages := r.ReadUint32()
 	if _ehdrNewEncryptedMessages != nil {
 		return nil, _ehdrNewEncryptedMessages
+	}
+	if _errNewEncryptedMessages := checkVectorConstructor(_vhdrNewEncryptedMessages); _errNewEncryptedMessages != nil {
+		return nil, _errNewEncryptedMessages
 	}
 	_cntNewEncryptedMessages, _ecntNewEncryptedMessages := r.ReadUint32()
 	if _ecntNewEncryptedMessages != nil {
@@ -10276,12 +11270,18 @@ func DecodeUpdatesDifferenceSlice(r *Reader) (*UpdatesDifferenceSlice, error) {
 		if _errNewEncryptedMessages != nil {
 			return nil, _errNewEncryptedMessages
 		}
-		v.NewEncryptedMessages[_iNewEncryptedMessages] = _objNewEncryptedMessages.(EncryptedMessageClass)
+		_cNewEncryptedMessages, _okNewEncryptedMessages := _objNewEncryptedMessages.(EncryptedMessageClass)
+		if !_okNewEncryptedMessages {
+			return nil, fmt.Errorf("decode: field new_encrypted_messages: unexpected type %T", _objNewEncryptedMessages)
+		}
+		v.NewEncryptedMessages[_iNewEncryptedMessages] = _cNewEncryptedMessages
 	}
-	_ = _vhdrNewEncryptedMessages
 	_vhdrOtherUpdates, _ehdrOtherUpdates := r.ReadUint32()
 	if _ehdrOtherUpdates != nil {
 		return nil, _ehdrOtherUpdates
+	}
+	if _errOtherUpdates := checkVectorConstructor(_vhdrOtherUpdates); _errOtherUpdates != nil {
+		return nil, _errOtherUpdates
 	}
 	_cntOtherUpdates, _ecntOtherUpdates := r.ReadUint32()
 	if _ecntOtherUpdates != nil {
@@ -10296,12 +11296,18 @@ func DecodeUpdatesDifferenceSlice(r *Reader) (*UpdatesDifferenceSlice, error) {
 		if _errOtherUpdates != nil {
 			return nil, _errOtherUpdates
 		}
-		v.OtherUpdates[_iOtherUpdates] = _objOtherUpdates.(UpdateClass)
+		_cOtherUpdates, _okOtherUpdates := _objOtherUpdates.(UpdateClass)
+		if !_okOtherUpdates {
+			return nil, fmt.Errorf("decode: field other_updates: unexpected type %T", _objOtherUpdates)
+		}
+		v.OtherUpdates[_iOtherUpdates] = _cOtherUpdates
 	}
-	_ = _vhdrOtherUpdates
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -10316,12 +11322,18 @@ func DecodeUpdatesDifferenceSlice(r *Reader) (*UpdatesDifferenceSlice, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -10336,14 +11348,21 @@ func DecodeUpdatesDifferenceSlice(r *Reader) (*UpdatesDifferenceSlice, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_objIntermediateState, _errIntermediateState := ReadTLObject(r)
 	if _errIntermediateState != nil {
 		return nil, _errIntermediateState
 	}
-	v.IntermediateState = _objIntermediateState.(*UpdatesState)
+	_cIntermediateState, _okIntermediateState := _objIntermediateState.(*UpdatesState)
+	if !_okIntermediateState {
+		return nil, fmt.Errorf("decode: field intermediate_state: unexpected type %T", _objIntermediateState)
+	}
+	v.IntermediateState = _cIntermediateState
 	return v, nil
 }
 
@@ -10562,11 +11581,11 @@ func (v *UpdateShortMessage) Encode(b *bytes.Buffer) error {
 // DecodeUpdateShortMessage deserializes a UpdateShortMessage from a reader using the TL binary protocol.
 func DecodeUpdateShortMessage(r *Reader) (*UpdateShortMessage, error) {
 	v := &UpdateShortMessage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Out = v.Flags.Has(1)
 	v.Mentioned = v.Flags.Has(4)
 	v.MediaUnread = v.Flags.Has(5)
@@ -10606,7 +11625,11 @@ func DecodeUpdateShortMessage(r *Reader) (*UpdateShortMessage, error) {
 		if _errFwdFrom != nil {
 			return nil, _errFwdFrom
 		}
-		v.FwdFrom = _objFwdFrom.(*MessageFwdHeader)
+		_cFwdFrom, _okFwdFrom := _objFwdFrom.(*MessageFwdHeader)
+		if !_okFwdFrom {
+			return nil, fmt.Errorf("decode: field fwd_from: unexpected type %T", _objFwdFrom)
+		}
+		v.FwdFrom = _cFwdFrom
 	}
 	if v.Flags.Has(11) {
 		_rViaBotID, _eViaBotID := r.ReadInt64()
@@ -10620,12 +11643,19 @@ func DecodeUpdateShortMessage(r *Reader) (*UpdateShortMessage, error) {
 		if _errReplyTo != nil {
 			return nil, _errReplyTo
 		}
-		v.ReplyTo = _objReplyTo.(MessageReplyHeaderClass)
+		_cReplyTo, _okReplyTo := _objReplyTo.(MessageReplyHeaderClass)
+		if !_okReplyTo {
+			return nil, fmt.Errorf("decode: field reply_to: unexpected type %T", _objReplyTo)
+		}
+		v.ReplyTo = _cReplyTo
 	}
 	if v.Flags.Has(7) {
 		_vhdrEntities, _ehdrEntities := r.ReadUint32()
 		if _ehdrEntities != nil {
 			return nil, _ehdrEntities
+		}
+		if _errEntities := checkVectorConstructor(_vhdrEntities); _errEntities != nil {
+			return nil, _errEntities
 		}
 		_cntEntities, _ecntEntities := r.ReadUint32()
 		if _ecntEntities != nil {
@@ -10640,9 +11670,12 @@ func DecodeUpdateShortMessage(r *Reader) (*UpdateShortMessage, error) {
 			if _errEntities != nil {
 				return nil, _errEntities
 			}
-			v.Entities[_iEntities] = _objEntities.(MessageEntityClass)
+			_cEntities, _okEntities := _objEntities.(MessageEntityClass)
+			if !_okEntities {
+				return nil, fmt.Errorf("decode: field entities: unexpected type %T", _objEntities)
+			}
+			v.Entities[_iEntities] = _cEntities
 		}
-		_ = _vhdrEntities
 	}
 	if v.Flags.Has(25) {
 		_rTTLPeriod, _eTTLPeriod := r.ReadInt32()
@@ -10756,11 +11789,11 @@ func (v *UpdateShortChatMessage) Encode(b *bytes.Buffer) error {
 // DecodeUpdateShortChatMessage deserializes a UpdateShortChatMessage from a reader using the TL binary protocol.
 func DecodeUpdateShortChatMessage(r *Reader) (*UpdateShortChatMessage, error) {
 	v := &UpdateShortChatMessage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Out = v.Flags.Has(1)
 	v.Mentioned = v.Flags.Has(4)
 	v.MediaUnread = v.Flags.Has(5)
@@ -10805,7 +11838,11 @@ func DecodeUpdateShortChatMessage(r *Reader) (*UpdateShortChatMessage, error) {
 		if _errFwdFrom != nil {
 			return nil, _errFwdFrom
 		}
-		v.FwdFrom = _objFwdFrom.(*MessageFwdHeader)
+		_cFwdFrom, _okFwdFrom := _objFwdFrom.(*MessageFwdHeader)
+		if !_okFwdFrom {
+			return nil, fmt.Errorf("decode: field fwd_from: unexpected type %T", _objFwdFrom)
+		}
+		v.FwdFrom = _cFwdFrom
 	}
 	if v.Flags.Has(11) {
 		_rViaBotID, _eViaBotID := r.ReadInt64()
@@ -10819,12 +11856,19 @@ func DecodeUpdateShortChatMessage(r *Reader) (*UpdateShortChatMessage, error) {
 		if _errReplyTo != nil {
 			return nil, _errReplyTo
 		}
-		v.ReplyTo = _objReplyTo.(MessageReplyHeaderClass)
+		_cReplyTo, _okReplyTo := _objReplyTo.(MessageReplyHeaderClass)
+		if !_okReplyTo {
+			return nil, fmt.Errorf("decode: field reply_to: unexpected type %T", _objReplyTo)
+		}
+		v.ReplyTo = _cReplyTo
 	}
 	if v.Flags.Has(7) {
 		_vhdrEntities, _ehdrEntities := r.ReadUint32()
 		if _ehdrEntities != nil {
 			return nil, _ehdrEntities
+		}
+		if _errEntities := checkVectorConstructor(_vhdrEntities); _errEntities != nil {
+			return nil, _errEntities
 		}
 		_cntEntities, _ecntEntities := r.ReadUint32()
 		if _ecntEntities != nil {
@@ -10839,9 +11883,12 @@ func DecodeUpdateShortChatMessage(r *Reader) (*UpdateShortChatMessage, error) {
 			if _errEntities != nil {
 				return nil, _errEntities
 			}
-			v.Entities[_iEntities] = _objEntities.(MessageEntityClass)
+			_cEntities, _okEntities := _objEntities.(MessageEntityClass)
+			if !_okEntities {
+				return nil, fmt.Errorf("decode: field entities: unexpected type %T", _objEntities)
+			}
+			v.Entities[_iEntities] = _cEntities
 		}
-		_ = _vhdrEntities
 	}
 	if v.Flags.Has(25) {
 		_rTTLPeriod, _eTTLPeriod := r.ReadInt32()
@@ -10887,7 +11934,11 @@ func DecodeUpdateShort(r *Reader) (*UpdateShort, error) {
 	if _errUpdate != nil {
 		return nil, _errUpdate
 	}
-	v.Update = _objUpdate.(UpdateClass)
+	_cUpdate, _okUpdate := _objUpdate.(UpdateClass)
+	if !_okUpdate {
+		return nil, fmt.Errorf("decode: field update: unexpected type %T", _objUpdate)
+	}
+	v.Update = _cUpdate
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -10950,6 +12001,9 @@ func DecodeUpdatesCombined(r *Reader) (*UpdatesCombined, error) {
 	if _ehdrUpdates != nil {
 		return nil, _ehdrUpdates
 	}
+	if _errUpdates := checkVectorConstructor(_vhdrUpdates); _errUpdates != nil {
+		return nil, _errUpdates
+	}
 	_cntUpdates, _ecntUpdates := r.ReadUint32()
 	if _ecntUpdates != nil {
 		return nil, _ecntUpdates
@@ -10963,12 +12017,18 @@ func DecodeUpdatesCombined(r *Reader) (*UpdatesCombined, error) {
 		if _errUpdates != nil {
 			return nil, _errUpdates
 		}
-		v.Updates[_iUpdates] = _objUpdates.(UpdateClass)
+		_cUpdates, _okUpdates := _objUpdates.(UpdateClass)
+		if !_okUpdates {
+			return nil, fmt.Errorf("decode: field updates: unexpected type %T", _objUpdates)
+		}
+		v.Updates[_iUpdates] = _cUpdates
 	}
-	_ = _vhdrUpdates
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -10983,12 +12043,18 @@ func DecodeUpdatesCombined(r *Reader) (*UpdatesCombined, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -11003,9 +12069,12 @@ func DecodeUpdatesCombined(r *Reader) (*UpdatesCombined, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -11076,6 +12145,9 @@ func DecodeUpdates(r *Reader) (*Updates, error) {
 	if _ehdrUpdates != nil {
 		return nil, _ehdrUpdates
 	}
+	if _errUpdates := checkVectorConstructor(_vhdrUpdates); _errUpdates != nil {
+		return nil, _errUpdates
+	}
 	_cntUpdates, _ecntUpdates := r.ReadUint32()
 	if _ecntUpdates != nil {
 		return nil, _ecntUpdates
@@ -11089,12 +12161,18 @@ func DecodeUpdates(r *Reader) (*Updates, error) {
 		if _errUpdates != nil {
 			return nil, _errUpdates
 		}
-		v.Updates[_iUpdates] = _objUpdates.(UpdateClass)
+		_cUpdates, _okUpdates := _objUpdates.(UpdateClass)
+		if !_okUpdates {
+			return nil, fmt.Errorf("decode: field updates: unexpected type %T", _objUpdates)
+		}
+		v.Updates[_iUpdates] = _cUpdates
 	}
-	_ = _vhdrUpdates
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -11109,12 +12187,18 @@ func DecodeUpdates(r *Reader) (*Updates, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -11129,9 +12213,12 @@ func DecodeUpdates(r *Reader) (*Updates, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -11215,11 +12302,11 @@ func (v *UpdateShortSentMessage) Encode(b *bytes.Buffer) error {
 // DecodeUpdateShortSentMessage deserializes a UpdateShortSentMessage from a reader using the TL binary protocol.
 func DecodeUpdateShortSentMessage(r *Reader) (*UpdateShortSentMessage, error) {
 	v := &UpdateShortSentMessage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Out = v.Flags.Has(1)
 	_rID, _eID := r.ReadInt32()
 	if _eID != nil {
@@ -11246,12 +12333,19 @@ func DecodeUpdateShortSentMessage(r *Reader) (*UpdateShortSentMessage, error) {
 		if _errMedia != nil {
 			return nil, _errMedia
 		}
-		v.Media = _objMedia.(MessageMediaClass)
+		_cMedia, _okMedia := _objMedia.(MessageMediaClass)
+		if !_okMedia {
+			return nil, fmt.Errorf("decode: field media: unexpected type %T", _objMedia)
+		}
+		v.Media = _cMedia
 	}
 	if v.Flags.Has(7) {
 		_vhdrEntities, _ehdrEntities := r.ReadUint32()
 		if _ehdrEntities != nil {
 			return nil, _ehdrEntities
+		}
+		if _errEntities := checkVectorConstructor(_vhdrEntities); _errEntities != nil {
+			return nil, _errEntities
 		}
 		_cntEntities, _ecntEntities := r.ReadUint32()
 		if _ecntEntities != nil {
@@ -11266,9 +12360,12 @@ func DecodeUpdateShortSentMessage(r *Reader) (*UpdateShortSentMessage, error) {
 			if _errEntities != nil {
 				return nil, _errEntities
 			}
-			v.Entities[_iEntities] = _objEntities.(MessageEntityClass)
+			_cEntities, _okEntities := _objEntities.(MessageEntityClass)
+			if !_okEntities {
+				return nil, fmt.Errorf("decode: field entities: unexpected type %T", _objEntities)
+			}
+			v.Entities[_iEntities] = _cEntities
 		}
-		_ = _vhdrEntities
 	}
 	if v.Flags.Has(25) {
 		_rTTLPeriod, _eTTLPeriod := r.ReadInt32()
@@ -11352,11 +12449,11 @@ func (v *UpdatesChannelDifferenceEmpty) Encode(b *bytes.Buffer) error {
 // DecodeUpdatesChannelDifferenceEmpty deserializes a UpdatesChannelDifferenceEmpty from a reader using the TL binary protocol.
 func DecodeUpdatesChannelDifferenceEmpty(r *Reader) (*UpdatesChannelDifferenceEmpty, error) {
 	v := &UpdatesChannelDifferenceEmpty{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Final = v.Flags.Has(0)
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
@@ -11437,11 +12534,11 @@ func (v *UpdatesChannelDifferenceTooLong) Encode(b *bytes.Buffer) error {
 // DecodeUpdatesChannelDifferenceTooLong deserializes a UpdatesChannelDifferenceTooLong from a reader using the TL binary protocol.
 func DecodeUpdatesChannelDifferenceTooLong(r *Reader) (*UpdatesChannelDifferenceTooLong, error) {
 	v := &UpdatesChannelDifferenceTooLong{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Final = v.Flags.Has(0)
 	if v.Flags.Has(1) {
 		_rTimeout, _eTimeout := r.ReadInt32()
@@ -11454,10 +12551,17 @@ func DecodeUpdatesChannelDifferenceTooLong(r *Reader) (*UpdatesChannelDifference
 	if _errDialog != nil {
 		return nil, _errDialog
 	}
-	v.Dialog = _objDialog.(DialogClass)
+	_cDialog, _okDialog := _objDialog.(DialogClass)
+	if !_okDialog {
+		return nil, fmt.Errorf("decode: field dialog: unexpected type %T", _objDialog)
+	}
+	v.Dialog = _cDialog
 	_vhdrMessages, _ehdrMessages := r.ReadUint32()
 	if _ehdrMessages != nil {
 		return nil, _ehdrMessages
+	}
+	if _errMessages := checkVectorConstructor(_vhdrMessages); _errMessages != nil {
+		return nil, _errMessages
 	}
 	_cntMessages, _ecntMessages := r.ReadUint32()
 	if _ecntMessages != nil {
@@ -11472,12 +12576,18 @@ func DecodeUpdatesChannelDifferenceTooLong(r *Reader) (*UpdatesChannelDifference
 		if _errMessages != nil {
 			return nil, _errMessages
 		}
-		v.Messages[_iMessages] = _objMessages.(MessageClass)
+		_cMessages, _okMessages := _objMessages.(MessageClass)
+		if !_okMessages {
+			return nil, fmt.Errorf("decode: field messages: unexpected type %T", _objMessages)
+		}
+		v.Messages[_iMessages] = _cMessages
 	}
-	_ = _vhdrMessages
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -11492,12 +12602,18 @@ func DecodeUpdatesChannelDifferenceTooLong(r *Reader) (*UpdatesChannelDifference
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -11512,9 +12628,12 @@ func DecodeUpdatesChannelDifferenceTooLong(r *Reader) (*UpdatesChannelDifference
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -11588,11 +12707,11 @@ func (v *UpdatesChannelDifference) Encode(b *bytes.Buffer) error {
 // DecodeUpdatesChannelDifference deserializes a UpdatesChannelDifference from a reader using the TL binary protocol.
 func DecodeUpdatesChannelDifference(r *Reader) (*UpdatesChannelDifference, error) {
 	v := &UpdatesChannelDifference{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Final = v.Flags.Has(0)
 	_rPTS, _ePTS := r.ReadInt32()
 	if _ePTS != nil {
@@ -11610,6 +12729,9 @@ func DecodeUpdatesChannelDifference(r *Reader) (*UpdatesChannelDifference, error
 	if _ehdrNewMessages != nil {
 		return nil, _ehdrNewMessages
 	}
+	if _errNewMessages := checkVectorConstructor(_vhdrNewMessages); _errNewMessages != nil {
+		return nil, _errNewMessages
+	}
 	_cntNewMessages, _ecntNewMessages := r.ReadUint32()
 	if _ecntNewMessages != nil {
 		return nil, _ecntNewMessages
@@ -11623,12 +12745,18 @@ func DecodeUpdatesChannelDifference(r *Reader) (*UpdatesChannelDifference, error
 		if _errNewMessages != nil {
 			return nil, _errNewMessages
 		}
-		v.NewMessages[_iNewMessages] = _objNewMessages.(MessageClass)
+		_cNewMessages, _okNewMessages := _objNewMessages.(MessageClass)
+		if !_okNewMessages {
+			return nil, fmt.Errorf("decode: field new_messages: unexpected type %T", _objNewMessages)
+		}
+		v.NewMessages[_iNewMessages] = _cNewMessages
 	}
-	_ = _vhdrNewMessages
 	_vhdrOtherUpdates, _ehdrOtherUpdates := r.ReadUint32()
 	if _ehdrOtherUpdates != nil {
 		return nil, _ehdrOtherUpdates
+	}
+	if _errOtherUpdates := checkVectorConstructor(_vhdrOtherUpdates); _errOtherUpdates != nil {
+		return nil, _errOtherUpdates
 	}
 	_cntOtherUpdates, _ecntOtherUpdates := r.ReadUint32()
 	if _ecntOtherUpdates != nil {
@@ -11643,12 +12771,18 @@ func DecodeUpdatesChannelDifference(r *Reader) (*UpdatesChannelDifference, error
 		if _errOtherUpdates != nil {
 			return nil, _errOtherUpdates
 		}
-		v.OtherUpdates[_iOtherUpdates] = _objOtherUpdates.(UpdateClass)
+		_cOtherUpdates, _okOtherUpdates := _objOtherUpdates.(UpdateClass)
+		if !_okOtherUpdates {
+			return nil, fmt.Errorf("decode: field other_updates: unexpected type %T", _objOtherUpdates)
+		}
+		v.OtherUpdates[_iOtherUpdates] = _cOtherUpdates
 	}
-	_ = _vhdrOtherUpdates
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -11663,12 +12797,18 @@ func DecodeUpdatesChannelDifference(r *Reader) (*UpdatesChannelDifference, error
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -11683,9 +12823,12 @@ func DecodeUpdatesChannelDifference(r *Reader) (*UpdatesChannelDifference, error
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -11749,6 +12892,9 @@ func DecodeLangPackDifference(r *Reader) (*LangPackDifference, error) {
 	if _ehdrStrings != nil {
 		return nil, _ehdrStrings
 	}
+	if _errStrings := checkVectorConstructor(_vhdrStrings); _errStrings != nil {
+		return nil, _errStrings
+	}
 	_cntStrings, _ecntStrings := r.ReadUint32()
 	if _ecntStrings != nil {
 		return nil, _ecntStrings
@@ -11762,9 +12908,12 @@ func DecodeLangPackDifference(r *Reader) (*LangPackDifference, error) {
 		if _errStrings != nil {
 			return nil, _errStrings
 		}
-		v.Strings[_iStrings] = _objStrings.(LangPackStringClass)
+		_cStrings, _okStrings := _objStrings.(LangPackStringClass)
+		if !_okStrings {
+			return nil, fmt.Errorf("decode: field strings: unexpected type %T", _objStrings)
+		}
+		v.Strings[_iStrings] = _cStrings
 	}
-	_ = _vhdrStrings
 	return v, nil
 }
 

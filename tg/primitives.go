@@ -26,7 +26,9 @@ func ReadIntErr(r io.Reader) (uint32, error) {
 
 // WriteInt writes a 32-bit little-endian unsigned integer to b.
 func WriteInt(b *bytes.Buffer, v uint32) {
-	_ = binary.Write(b, binary.LittleEndian, v)
+	var data [4]byte
+	binary.LittleEndian.PutUint32(data[:], v)
+	_, _ = b.Write(data[:])
 }
 
 // ReadLong reads a 64-bit little-endian signed integer from r.
@@ -38,7 +40,9 @@ func ReadLong(r io.Reader) int64 {
 
 // WriteLong writes a 64-bit little-endian signed integer to b.
 func WriteLong(b *bytes.Buffer, v int64) {
-	_ = binary.Write(b, binary.LittleEndian, v)
+	var data [8]byte
+	binary.LittleEndian.PutUint64(data[:], uint64(v))
+	_, _ = b.Write(data[:])
 }
 
 // ReadInt128 reads a 128-bit (16-byte) value from r.
@@ -170,11 +174,11 @@ func WriteString(b *bytes.Buffer, v string) {
 	WriteBytes(b, []byte(v))
 }
 
-const vectorBareID uint32 = 0x1cb5c415
-
 // ReadVectorInt reads a TL-encoded vector of int32 values from r.
 func ReadVectorInt(r io.Reader) []int32 {
-	ReadInt(r)
+	if checkVectorConstructor(ReadInt(r)) != nil {
+		return nil
+	}
 	count := ReadInt(r)
 	if checkVectorCount(count) != nil {
 		return nil
@@ -188,7 +192,7 @@ func ReadVectorInt(r io.Reader) []int32 {
 
 // WriteVectorInt writes a TL-encoded vector of int32 values to b.
 func WriteVectorInt(b *bytes.Buffer, v []int32) {
-	WriteInt(b, vectorBareID)
+	WriteInt(b, VectorTypeID)
 	WriteInt(b, uint32(len(v)))
 	for _, item := range v {
 		WriteInt(b, uint32(item))
@@ -197,7 +201,9 @@ func WriteVectorInt(b *bytes.Buffer, v []int32) {
 
 // ReadVectorLong reads a TL-encoded vector of int64 values from r.
 func ReadVectorLong(r io.Reader) []int64 {
-	ReadInt(r)
+	if checkVectorConstructor(ReadInt(r)) != nil {
+		return nil
+	}
 	count := ReadInt(r)
 	if checkVectorCount(count) != nil {
 		return nil
@@ -211,7 +217,7 @@ func ReadVectorLong(r io.Reader) []int64 {
 
 // WriteVectorLong writes a TL-encoded vector of int64 values to b.
 func WriteVectorLong(b *bytes.Buffer, v []int64) {
-	WriteInt(b, vectorBareID)
+	WriteInt(b, VectorTypeID)
 	WriteInt(b, uint32(len(v)))
 	for _, item := range v {
 		WriteLong(b, item)
@@ -220,7 +226,9 @@ func WriteVectorLong(b *bytes.Buffer, v []int64) {
 
 // ReadVectorString reads a TL-encoded vector of strings from r.
 func ReadVectorString(r io.Reader) []string {
-	ReadInt(r)
+	if checkVectorConstructor(ReadInt(r)) != nil {
+		return nil
+	}
 	count := ReadInt(r)
 	if checkVectorCount(count) != nil {
 		return nil
@@ -234,7 +242,7 @@ func ReadVectorString(r io.Reader) []string {
 
 // WriteVectorString writes a TL-encoded vector of strings to b.
 func WriteVectorString(b *bytes.Buffer, v []string) {
-	WriteInt(b, vectorBareID)
+	WriteInt(b, VectorTypeID)
 	WriteInt(b, uint32(len(v)))
 	for _, item := range v {
 		WriteString(b, item)
@@ -243,7 +251,9 @@ func WriteVectorString(b *bytes.Buffer, v []string) {
 
 // ReadVectorBytes reads a TL-encoded vector of byte slices from r.
 func ReadVectorBytes(r io.Reader) [][]byte {
-	ReadInt(r)
+	if checkVectorConstructor(ReadInt(r)) != nil {
+		return nil
+	}
 	count := ReadInt(r)
 	if checkVectorCount(count) != nil {
 		return nil
@@ -257,7 +267,7 @@ func ReadVectorBytes(r io.Reader) [][]byte {
 
 // WriteVectorBytes writes a TL-encoded vector of byte slices to b.
 func WriteVectorBytes(b *bytes.Buffer, v [][]byte) {
-	WriteInt(b, vectorBareID)
+	WriteInt(b, VectorTypeID)
 	WriteInt(b, uint32(len(v)))
 	for _, item := range v {
 		WriteBytes(b, item)
@@ -286,10 +296,10 @@ type GenericVector struct {
 	Items []TLObject
 }
 
-func (v *GenericVector) ConstructorID() uint32 { return vectorBareID }
+func (v *GenericVector) ConstructorID() uint32 { return VectorTypeID }
 
 func (v *GenericVector) Encode(b *bytes.Buffer) error {
-	WriteInt(b, vectorBareID)
+	WriteInt(b, VectorTypeID)
 	WriteInt(b, uint32(len(v.Items)))
 	for _, item := range v.Items {
 		if err := EncodeTLObject(b, item); err != nil {
@@ -300,7 +310,7 @@ func (v *GenericVector) Encode(b *bytes.Buffer) error {
 }
 
 func WriteVectorObject(b *bytes.Buffer, items []TLObject) error {
-	WriteInt(b, vectorBareID)
+	WriteInt(b, VectorTypeID)
 	WriteInt(b, uint32(len(items)))
 	for _, item := range items {
 		if err := EncodeTLObject(b, item); err != nil {
@@ -317,6 +327,10 @@ func ReadVectorObject(r *Reader) ([]TLObject, error) {
 	}
 	if err := checkVectorCount(count); err != nil {
 		return nil, err
+	}
+	// Each element is at least 4 bytes (constructor ID).
+	if int(count)*4 > r.Len() {
+		return nil, io.ErrUnexpectedEOF
 	}
 	items := make([]TLObject, count)
 	for i := range items {
@@ -336,7 +350,7 @@ func init() {
 	Registry[BoolFalseID] = func(r *Reader) (TLObject, error) {
 		return TLBool(false), nil
 	}
-	Registry[vectorBareID] = func(r *Reader) (TLObject, error) {
+	Registry[VectorTypeID] = func(r *Reader) (TLObject, error) {
 		count, err := r.ReadUint32()
 		if err != nil {
 			return nil, err

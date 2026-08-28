@@ -53,6 +53,12 @@ type Button struct {
 	SamePeer bool
 	// UserID is the user ID associated with a URL-auth button for login flows.
 	UserID int64
+	// CopyText is the payload copied to the clipboard for copy buttons.
+	CopyText string
+	// Quiz indicates that a poll button requests a quiz rather than a regular poll.
+	Quiz bool
+	// ButtonID identifies a request-peer button in the resulting callback.
+	ButtonID int32
 }
 
 // ReplyMarkupType enumerates the kinds of reply markup a message can carry.
@@ -87,6 +93,20 @@ const (
 	ButtonBuy
 	// ButtonURLAuth triggers a URL-based Telegram login flow.
 	ButtonURLAuth
+	// ButtonWebView opens a Telegram Mini App.
+	ButtonWebView
+	// ButtonCopy copies text to the clipboard.
+	ButtonCopy
+	// ButtonUserProfile opens a user's profile.
+	ButtonUserProfile
+	// ButtonRequestPhone requests the user's phone number.
+	ButtonRequestPhone
+	// ButtonRequestGeo requests the user's location.
+	ButtonRequestGeo
+	// ButtonRequestPoll prompts the user to create a poll or quiz.
+	ButtonRequestPoll
+	// ButtonRequestPeer lets the user share a chat, channel, or user.
+	ButtonRequestPeer
 )
 
 // ParseReplyMarkup converts a TL reply markup object into a ReplyMarkup.
@@ -99,10 +119,10 @@ func ParseReplyMarkup(raw tg.ReplyMarkupClass) *ReplyMarkup {
 	switch r := raw.(type) {
 	case *tg.ReplyInlineMarkup:
 		rm.Type = ReplyMarkupInline
-		rm.Rows = parseButtonRows(r.Rows)
+		rm.Rows = parseInlineButtonRows(r.Rows)
 	case *tg.ReplyKeyboardMarkup:
 		rm.Type = ReplyMarkupKeyboard
-		rm.Rows = parseButtonRows(r.Rows)
+		rm.Rows = parseReplyButtonRows(r.Rows)
 		rm.Resize = r.Resize
 		rm.SingleUse = r.SingleUse
 		rm.Selective = r.Selective
@@ -124,7 +144,7 @@ func ParseReplyMarkup(raw tg.ReplyMarkupClass) *ReplyMarkup {
 	return rm
 }
 
-func parseButtonRows(rows []*tg.KeyboardButtonRow) [][]Button {
+func parseInlineButtonRows(rows []*tg.KeyboardInlineButtonRow) [][]Button {
 	if rows == nil {
 		return nil
 	}
@@ -135,8 +155,8 @@ func parseButtonRows(rows []*tg.KeyboardButtonRow) [][]Button {
 		}
 		buttons := make([]Button, 0, len(row.Buttons))
 		for _, btn := range row.Buttons {
-			if b := parseButton(btn); b != nil {
-				buttons = append(buttons, *b)
+			if btn != nil {
+				buttons = append(buttons, parseInlineButton(btn))
 			}
 		}
 		result = append(result, buttons)
@@ -144,43 +164,91 @@ func parseButtonRows(rows []*tg.KeyboardButtonRow) [][]Button {
 	return result
 }
 
-func parseButton(raw tg.KeyboardButtonClass) *Button {
-	if raw == nil {
+func parseReplyButtonRows(rows []*tg.KeyboardButtonRow) [][]Button {
+	if rows == nil {
 		return nil
 	}
-	b := &Button{}
-	switch r := raw.(type) {
-	case *tg.KeyboardButton:
-		b.Type = ButtonDefault
-		b.Text = r.Text
-	case *tg.KeyboardButtonURL:
+	result := make([][]Button, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		buttons := make([]Button, 0, len(row.Buttons))
+		for _, btn := range row.Buttons {
+			if btn != nil {
+				buttons = append(buttons, parseReplyButton(btn))
+			}
+		}
+		result = append(result, buttons)
+	}
+	return result
+}
+
+// parseInlineButton converts a layer 229 keyboardInlineButton, whose action
+// lives in the nested InlineButtonType constructor.
+func parseInlineButton(btn *tg.KeyboardInlineButton) Button {
+	b := Button{Text: btn.Text}
+	switch t := btn.Type.(type) {
+	case *tg.InlineButtonTypeURL:
 		b.Type = ButtonURL
-		b.Text = r.Text
-		b.URL = r.URL
-	case *tg.KeyboardButtonCallback:
+		b.URL = t.URL
+	case *tg.InlineButtonTypeCallback:
 		b.Type = ButtonCallback
-		b.Text = r.Text
-		b.Data = r.Data
-	case *tg.KeyboardButtonSwitchInline:
+		b.Data = t.Data
+	case *tg.InlineButtonTypeSwitchInline:
 		b.Type = ButtonSwitchInline
-		b.Text = r.Text
-		b.Query = r.Query
-		b.SamePeer = r.SamePeer
-	case *tg.KeyboardButtonGame:
+		b.Query = t.Query
+		b.SamePeer = t.SamePeer
+	case *tg.InlineButtonTypeGame:
 		b.Type = ButtonGame
-		b.Text = r.Text
-	case *tg.KeyboardButtonBuy:
+	case *tg.InlineButtonTypeBuy:
 		b.Type = ButtonBuy
-		b.Text = r.Text
-	case *tg.KeyboardButtonURLAuth:
+	case *tg.InlineButtonTypeURLAuth:
 		b.Type = ButtonURLAuth
-		b.Text = r.Text
-		b.URL = r.URL
+		b.URL = t.URL
+	case *tg.InputInlineButtonTypeURLAuth:
+		b.Type = ButtonURLAuth
+		b.URL = t.URL
+	case *tg.InlineButtonTypeWebView:
+		b.Type = ButtonWebView
+		b.URL = t.URL
+	case *tg.InlineButtonTypeCopy:
+		b.Type = ButtonCopy
+		b.CopyText = t.CopyText
+	case *tg.InlineButtonTypeUserProfile:
+		b.Type = ButtonUserProfile
+		b.UserID = t.UserID
+	case *tg.InputInlineButtonTypeUserProfile:
+		b.Type = ButtonUserProfile
 	default:
 		b.Type = ButtonDefault
-		if base, ok := raw.(interface{ GetText() string }); ok {
-			b.Text = base.GetText()
-		}
+	}
+	return b
+}
+
+// parseReplyButton converts a layer 229 keyboardButton, whose action lives in
+// the nested ButtonType constructor.
+func parseReplyButton(btn *tg.KeyboardButton) Button {
+	b := Button{Text: btn.Text}
+	switch t := btn.Type.(type) {
+	case *tg.ButtonTypeRequestPhone:
+		b.Type = ButtonRequestPhone
+	case *tg.ButtonTypeRequestGeoLocation:
+		b.Type = ButtonRequestGeo
+	case *tg.ButtonTypeRequestPoll:
+		b.Type = ButtonRequestPoll
+		b.Quiz = t.Quiz
+	case *tg.ButtonTypeRequestPeer:
+		b.Type = ButtonRequestPeer
+		b.ButtonID = t.ButtonID
+	case *tg.InputButtonTypeRequestPeer:
+		b.Type = ButtonRequestPeer
+		b.ButtonID = t.ButtonID
+	case *tg.ButtonTypeSimpleWebView:
+		b.Type = ButtonWebView
+		b.URL = t.URL
+	default:
+		b.Type = ButtonDefault
 	}
 	return b
 }

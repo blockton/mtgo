@@ -31,18 +31,20 @@ func (t *TCPIntermediate) Connect() error {
 // Conn returns the underlying net.Conn.
 func (t *TCPIntermediate) Conn() net.Conn { return t.conn }
 
+// send4ByteLengthPrefix writes buf to conn with a 4-byte little-endian length
+// prefix. Shared by TCPIntermediate and TCPIntermediateNoHeader.
+func send4ByteLengthPrefix(conn net.Conn, buf *bytes.Buffer) error {
+	data := buf.Bytes()
+	packet := make([]byte, 4+len(data))
+	binary.LittleEndian.PutUint32(packet[:4], uint32(len(data)))
+	copy(packet[4:], data)
+	_, err := conn.Write(packet)
+	return err
+}
+
 // Send writes buf to the connection with a 4-byte little-endian length prefix.
 func (t *TCPIntermediate) Send(buf *bytes.Buffer) error {
-	data := buf.Bytes()
-
-	var header [4]byte
-	binary.LittleEndian.PutUint32(header[:], uint32(len(data)))
-
-	if _, err := t.conn.Write(header[:]); err != nil {
-		return err
-	}
-	_, err := t.conn.Write(data)
-	return err
+	return send4ByteLengthPrefix(t.conn, buf)
 }
 
 // Recv reads the next intermediate-transport framed message from the
@@ -53,11 +55,11 @@ func (t *TCPIntermediate) Recv() ([]byte, error) {
 		return nil, err
 	}
 
-	length := int(binary.LittleEndian.Uint32(lenBytes[:]))
-	if length > MaxPayloadLen {
+	rawLen := binary.LittleEndian.Uint32(lenBytes[:])
+	if rawLen > uint32(MaxPayloadLen) {
 		return nil, ErrPayloadTooLarge
 	}
-
+	length := int(rawLen)
 	if length == 0 {
 		return nil, nil
 	}

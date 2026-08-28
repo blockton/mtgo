@@ -10,28 +10,23 @@ type Invoker interface {
 	RPCInvokeRaw(ctx context.Context, input TLObject) ([]byte, error)
 }
 
+// InvokerFunc is a function type that implements Invoker, useful for
+// inline invoker implementations in middleware and tests.
 type InvokerFunc func(ctx context.Context, input TLObject, decode func(*Reader) (TLObject, error)) (TLObject, error)
 
+// RPCInvoke implements Invoker.
 func (f InvokerFunc) RPCInvoke(ctx context.Context, input TLObject, decode func(*Reader) (TLObject, error)) (TLObject, error) {
 	return f(ctx, input, decode)
 }
 
+// RPCInvokeRaw implements Invoker. Returns an error since InvokerFunc
+// does not support raw results.
 func (f InvokerFunc) RPCInvokeRaw(ctx context.Context, input TLObject) ([]byte, error) {
 	return nil, fmt.Errorf("tg: InvokerFunc does not implement RPCInvokeRaw")
 }
 
-// Client wraps an Invoker and provides a high-level RPC interface.
-type Client struct {
-	rpc Invoker
-}
-
 // RPC returns the underlying Invoker used by the client.
 func (c *RPCClient) RPC() Invoker { return c.rpc }
-
-// NewClient creates a new Client backed by the given Invoker.
-func NewClient(invoker Invoker) *Client {
-	return &Client{rpc: invoker}
-}
 
 // Invoke performs an RPC call by delegating to the underlying Invoker.
 func (c *RPCClient) Invoke(ctx context.Context, input TLObject, decode func(*Reader) (TLObject, error)) (TLObject, error) {
@@ -42,9 +37,4 @@ func (c *RPCClient) Invoke(ctx context.Context, input TLObject, decode func(*Rea
 // rpc_result result:Object payload bytes without gzip unpacking or TL decoding.
 func (c *RPCClient) InvokeWithRawResult(ctx context.Context, input TLObject) ([]byte, error) {
 	return c.rpc.RPCInvokeRaw(ctx, input)
-}
-
-// InvokeWithBytes is deprecated. Use [RPCClient.InvokeWithRawResult].
-func (c *RPCClient) InvokeWithBytes(ctx context.Context, input TLObject) ([]byte, error) {
-	return c.InvokeWithRawResult(ctx, input)
 }

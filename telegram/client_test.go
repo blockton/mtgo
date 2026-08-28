@@ -63,7 +63,13 @@ func TestNewClientDefaults(t *testing.T) {
 		t.Errorf("ClientPlatform = %q, want %q", c.cfg.Device.ClientPlatform, types.ClientPlatformAndroid)
 	}
 	if c.cfg.TransportMode != TransportModeAbridged {
-		t.Errorf("TransportMode = %q, want %q", c.cfg.TransportMode, TransportModeAbridged)
+		t.Errorf("TransportMode = %v, want %v", c.cfg.TransportMode, TransportModeAbridged)
+	}
+	if c.cfg.ConnPoolTTL != 10*time.Second {
+		t.Errorf("ConnPoolTTL = %v, want 10s", c.cfg.ConnPoolTTL)
+	}
+	if c.cfg.EndpointCoolDown != 16*time.Second {
+		t.Errorf("EndpointCoolDown = %v, want 16s", c.cfg.EndpointCoolDown)
 	}
 }
 
@@ -174,12 +180,12 @@ func TestNewClientWithOptions(t *testing.T) {
 		t.Errorf("TZOffset = %d", cfg.Device.TZOffset)
 	}
 	if cfg.TransportMode != TransportModeFull {
-		t.Errorf("TransportMode = %q", cfg.TransportMode)
+		t.Errorf("TransportMode = %v", cfg.TransportMode)
 	}
 }
 
 func TestNewClientRejectsInvalidTransportMode(t *testing.T) {
-	_, err := NewClient(111, "hash", &Config{TransportMode: "invalid"})
+	_, err := NewClient(111, "hash", &Config{TransportMode: TransportMode(99)})
 	if err == nil {
 		t.Fatal("expected invalid transport mode error")
 	}
@@ -423,9 +429,56 @@ func TestDisconnectTwice(t *testing.T) {
 func TestInvokeNotConnected(t *testing.T) {
 	c, _ := NewClient(12345, "hash", nil)
 
-	_, err := c.Invoke(context.Background(), nil, 1, 5*time.Second)
+	_, err := c.Invoke(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("Invoke() = %v, want ErrNotConnected", err)
+	}
+}
+
+func TestAutoConnectFailureRestoresDisconnectedState(t *testing.T) {
+	c, _ := NewClient(12345, "hash", &Config{AutoConnect: true})
+
+	for attempt := range 2 {
+		_, err := c.Invoke(context.Background(), nil)
+		if !errors.Is(err, ErrNoStorage) {
+			t.Fatalf("Invoke() attempt %d = %v, want ErrNoStorage", attempt+1, err)
+		}
+		if state := c.Health().State; state != ConnStateDisconnected {
+			t.Fatalf("state after attempt %d = %v, want disconnected", attempt+1, state)
+		}
+	}
+}
+
+func TestAutoConnectDisabledPreservesClosedError(t *testing.T) {
+	c, _ := NewClient(12345, "hash", nil)
+	c.state.SetClosed()
+
+	_, err := c.Invoke(context.Background(), nil)
+	if !errors.Is(err, ErrClientClosed) {
+		t.Fatalf("Invoke() = %v, want ErrClientClosed", err)
+	}
+}
+
+func TestRetryRPCOnReconnectDoesNotWaitForInitialConnection(t *testing.T) {
+	c, _ := NewClient(12345, "hash", &Config{RetryRPCOnReconnect: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Invoke(ctx, nil)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrNotConnected) {
+			t.Fatalf("Invoke() = %v, want ErrNotConnected", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		cancel()
+		<-done
+		t.Fatal("Invoke() waited for a reconnect before any connection existed")
 	}
 }
 
@@ -442,7 +495,7 @@ func TestNewClientAppliesRetriesConfig(t *testing.T) {
 func TestInvokeRawNotConnected(t *testing.T) {
 	c, _ := NewClient(12345, "hash", nil)
 
-	_, err := c.InvokeRaw(context.Background(), nil, 1, 5*time.Second)
+	_, err := c.InvokeRaw(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("InvokeRaw() = %v, want ErrNotConnected", err)
 	}
@@ -463,6 +516,15 @@ func TestInvokeWithRawResult(t *testing.T) {
 	_, err := c.InvokeWithRawResult(context.Background(), &tg.PingRequest{})
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("InvokeWithRawResult() = %v, want ErrNotConnected", err)
+	}
+}
+
+func TestDropRPCNotConnected(t *testing.T) {
+	c, _ := NewClient(12345, "hash", nil)
+
+	err := c.DropRPC(context.Background(), 12345)
+	if !errors.Is(err, ErrNotConnected) {
+		t.Errorf("DropRPC() = %v, want ErrNotConnected", err)
 	}
 }
 
@@ -919,19 +981,28 @@ func TestInitialDCID(t *testing.T) {
 	c, _ := NewClient(1, "h", nil)
 	st := NewMemoryStorage()
 
-	if got := c.initialDCID(st); got != 2 {
+	if got, err := c.initialDCID(st); err != nil || got != 2 {
+		if err != nil {
+			t.Fatalf("initialDCID empty storage: %v", err)
+		}
 		t.Fatalf("initialDCID empty storage = %d, want 2", got)
 	}
 
 	if err := st.SetDCID(4); err != nil {
 		t.Fatalf("SetDCID error: %v", err)
 	}
-	if got := c.initialDCID(st); got != 4 {
+	if got, err := c.initialDCID(st); err != nil || got != 4 {
+		if err != nil {
+			t.Fatalf("initialDCID stored: %v", err)
+		}
 		t.Fatalf("initialDCID stored = %d, want 4", got)
 	}
 
 	c, _ = NewClient(1, "h", &Config{DC: 3})
-	if got := c.initialDCID(st); got != 3 {
+	if got, err := c.initialDCID(st); err != nil || got != 3 {
+		if err != nil {
+			t.Fatalf("initialDCID configured: %v", err)
+		}
 		t.Fatalf("initialDCID configured = %d, want 3", got)
 	}
 }
@@ -993,6 +1064,20 @@ func TestGetSessionReturnsMainForCurrentDC(t *testing.T) {
 	}
 	if sess != mainSess {
 		t.Error("GetSession should return main session for current DC")
+	}
+	mediaSess, err := c.GetSession(context.Background(), 2, true, false)
+	if err != nil {
+		t.Fatalf("GetSession(2, media) = %v", err)
+	}
+	if mediaSess != mainSess {
+		t.Error("GetSession media request opened a second home-DC session")
+	}
+	cdnSess, err := c.GetSession(context.Background(), 2, false, true)
+	if err != nil {
+		t.Fatalf("GetSession(2, CDN) = %v", err)
+	}
+	if cdnSess == mainSess {
+		t.Error("GetSession routed a CDN request through the home API session")
 	}
 }
 
@@ -1168,12 +1253,12 @@ func TestFullLifecycle(t *testing.T) {
 func TestAllMethodsGuardNotConnected(t *testing.T) {
 	c, _ := NewClient(1, "h", nil)
 
-	_, err := c.Invoke(context.Background(), nil, 1, 5*time.Second)
+	_, err := c.Invoke(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("Invoke: %v", err)
 	}
 
-	_, err = c.InvokeRaw(context.Background(), nil, 1, 5*time.Second)
+	_, err = c.InvokeRaw(context.Background(), nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("InvokeRaw: %v", err)
 	}
@@ -1281,14 +1366,6 @@ func TestAllMethodsGuardNotConnected(t *testing.T) {
 	_, err = c.GetProfilePhotos(context.Background(), 0, nil)
 	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("GetProfilePhotos: %v", err)
-	}
-}
-
-func TestClientUpdateHealthNoManager(t *testing.T) {
-	c, _ := NewClient(1, "hash", nil)
-	h := c.UpdateHealth()
-	if h.Pts != 0 || h.Pending != 0 {
-		t.Fatalf("health = %+v", h)
 	}
 }
 
@@ -1401,10 +1478,21 @@ func (s *closeTrackingStorage) Close() error {
 	return nil
 }
 
+type closeTrackingResource struct {
+	closed bool
+}
+
+func (r *closeTrackingResource) Close() error {
+	r.closed = true
+	return nil
+}
+
 func TestCleanupSessionsCanKeepStorageForMigration(t *testing.T) {
 	c, _ := NewClient(1, "hash", nil)
 	st := &closeTrackingStorage{MemoryStorage: NewMemoryStorage()}
+	warm := &closeTrackingResource{}
 	c.storage = st
+	c.connPool.Put(2, session.DataCenter{ID: 2}, warm)
 
 	c.cleanupSessions(false)
 	if st.closed {
@@ -1412,6 +1500,9 @@ func TestCleanupSessionsCanKeepStorageForMigration(t *testing.T) {
 	}
 	if c.storage != st {
 		t.Fatal("storage should remain attached for migration retry")
+	}
+	if warm.closed || c.connPool.Count() != 1 {
+		t.Fatal("warm connection should remain available for migration retry")
 	}
 
 	c.cleanupSessions()
@@ -1421,4 +1512,25 @@ func TestCleanupSessionsCanKeepStorageForMigration(t *testing.T) {
 	if c.storage != nil {
 		t.Fatal("storage should be released during regular cleanup")
 	}
+	if !warm.closed || c.connPool.Count() != 0 {
+		t.Fatal("regular cleanup should close warm connections")
+	}
+}
+
+func TestConfigConcurrentReadUpdate(t *testing.T) {
+	c, _ := NewClient(1, "hash", nil)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 1_000; j++ {
+				_ = c.Config()
+			}
+		}()
+	}
+	for i := 0; i < 1_000; i++ {
+		c.updateConfig(func(cfg *Config) { cfg.DC = i%5 + 1 })
+	}
+	wg.Wait()
 }

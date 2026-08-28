@@ -4,6 +4,7 @@ package tg
 
 import (
 	"bytes"
+	"fmt"
 )
 
 // PhotoClass is the interface for TL type Photo.
@@ -126,11 +127,11 @@ func (v *Photo) Encode(b *bytes.Buffer) error {
 // DecodePhoto deserializes a Photo from a reader using the TL binary protocol.
 func DecodePhoto(r *Reader) (*Photo, error) {
 	v := &Photo{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.HasStickers = v.Flags.Has(0)
 	_rID, _eID := r.ReadInt64()
 	if _eID != nil {
@@ -156,6 +157,9 @@ func DecodePhoto(r *Reader) (*Photo, error) {
 	if _ehdrSizes != nil {
 		return nil, _ehdrSizes
 	}
+	if _errSizes := checkVectorConstructor(_vhdrSizes); _errSizes != nil {
+		return nil, _errSizes
+	}
 	_cntSizes, _ecntSizes := r.ReadUint32()
 	if _ecntSizes != nil {
 		return nil, _ecntSizes
@@ -169,13 +173,19 @@ func DecodePhoto(r *Reader) (*Photo, error) {
 		if _errSizes != nil {
 			return nil, _errSizes
 		}
-		v.Sizes[_iSizes] = _objSizes.(PhotoSizeClass)
+		_cSizes, _okSizes := _objSizes.(PhotoSizeClass)
+		if !_okSizes {
+			return nil, fmt.Errorf("decode: field sizes: unexpected type %T", _objSizes)
+		}
+		v.Sizes[_iSizes] = _cSizes
 	}
-	_ = _vhdrSizes
 	if v.Flags.Has(1) {
 		_vhdrVideoSizes, _ehdrVideoSizes := r.ReadUint32()
 		if _ehdrVideoSizes != nil {
 			return nil, _ehdrVideoSizes
+		}
+		if _errVideoSizes := checkVectorConstructor(_vhdrVideoSizes); _errVideoSizes != nil {
+			return nil, _errVideoSizes
 		}
 		_cntVideoSizes, _ecntVideoSizes := r.ReadUint32()
 		if _ecntVideoSizes != nil {
@@ -190,9 +200,12 @@ func DecodePhoto(r *Reader) (*Photo, error) {
 			if _errVideoSizes != nil {
 				return nil, _errVideoSizes
 			}
-			v.VideoSizes[_iVideoSizes] = _objVideoSizes.(VideoSizeClass)
+			_cVideoSizes, _okVideoSizes := _objVideoSizes.(VideoSizeClass)
+			if !_okVideoSizes {
+				return nil, fmt.Errorf("decode: field video_sizes: unexpected type %T", _objVideoSizes)
+			}
+			v.VideoSizes[_iVideoSizes] = _cVideoSizes
 		}
-		_ = _vhdrVideoSizes
 	}
 	_rDCID, _eDCID := r.ReadInt32()
 	if _eDCID != nil {
@@ -240,10 +253,17 @@ func DecodePhotosPhoto(r *Reader) (*PhotosPhoto, error) {
 	if _errPhoto != nil {
 		return nil, _errPhoto
 	}
-	v.Photo = _objPhoto.(PhotoClass)
+	_cPhoto, _okPhoto := _objPhoto.(PhotoClass)
+	if !_okPhoto {
+		return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+	}
+	v.Photo = _cPhoto
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -258,9 +278,12 @@ func DecodePhotosPhoto(r *Reader) (*PhotosPhoto, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -326,6 +349,9 @@ func DecodePhotosPhotos(r *Reader) (*PhotosPhotos, error) {
 	if _ehdrPhotos != nil {
 		return nil, _ehdrPhotos
 	}
+	if _errPhotos := checkVectorConstructor(_vhdrPhotos); _errPhotos != nil {
+		return nil, _errPhotos
+	}
 	_cntPhotos, _ecntPhotos := r.ReadUint32()
 	if _ecntPhotos != nil {
 		return nil, _ecntPhotos
@@ -339,12 +365,18 @@ func DecodePhotosPhotos(r *Reader) (*PhotosPhotos, error) {
 		if _errPhotos != nil {
 			return nil, _errPhotos
 		}
-		v.Photos[_iPhotos] = _objPhotos.(PhotoClass)
+		_cPhotos, _okPhotos := _objPhotos.(PhotoClass)
+		if !_okPhotos {
+			return nil, fmt.Errorf("decode: field photos: unexpected type %T", _objPhotos)
+		}
+		v.Photos[_iPhotos] = _cPhotos
 	}
-	_ = _vhdrPhotos
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -359,9 +391,12 @@ func DecodePhotosPhotos(r *Reader) (*PhotosPhotos, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -414,6 +449,9 @@ func DecodePhotosPhotosSlice(r *Reader) (*PhotosPhotosSlice, error) {
 	if _ehdrPhotos != nil {
 		return nil, _ehdrPhotos
 	}
+	if _errPhotos := checkVectorConstructor(_vhdrPhotos); _errPhotos != nil {
+		return nil, _errPhotos
+	}
 	_cntPhotos, _ecntPhotos := r.ReadUint32()
 	if _ecntPhotos != nil {
 		return nil, _ecntPhotos
@@ -427,12 +465,18 @@ func DecodePhotosPhotosSlice(r *Reader) (*PhotosPhotosSlice, error) {
 		if _errPhotos != nil {
 			return nil, _errPhotos
 		}
-		v.Photos[_iPhotos] = _objPhotos.(PhotoClass)
+		_cPhotos, _okPhotos := _objPhotos.(PhotoClass)
+		if !_okPhotos {
+			return nil, fmt.Errorf("decode: field photos: unexpected type %T", _objPhotos)
+		}
+		v.Photos[_iPhotos] = _cPhotos
 	}
-	_ = _vhdrPhotos
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -447,9 +491,12 @@ func DecodePhotosPhotosSlice(r *Reader) (*PhotosPhotosSlice, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 

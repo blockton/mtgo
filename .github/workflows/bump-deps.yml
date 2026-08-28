@@ -30,7 +30,7 @@ jobs:
   bump:
     name: ${{ matrix.repo }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +47,9 @@ jobs:
             modules: "."
           - repo: device-manager
             modules: "."
+          - repo: wasm
+            modules: "."
+            wasm: true
           - repo: plugins
             modules: "conversations i18n scheduler fsm throttle updatesrecovery rawdebug"
           - repo: plugins-template
@@ -74,25 +77,43 @@ jobs:
           token: ${{ secrets.MTGO_LABS_PAT }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.26.5"
           cache: false # multi-module repos break the cache key
 
       - name: Bump mtgo dependency
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           MODULES: ${{ matrix.modules }}
+          IS_WASM: ${{ matrix.wasm }}
         run: |
           set -euo pipefail
+          dependency="github.com/mtgo-labs/mtgo@$VERSION"
+          for attempt in 1 2 3 4 5; do
+            if go mod download "$dependency"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Go module proxy did not publish $dependency after $attempt attempts"
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "::warning::Go module proxy is not ready for $dependency; retrying in ${delay}s"
+            sleep "$delay"
+          done
           for mod in $MODULES; do
             echo "::group::Updating $mod"
             (
               cd "$mod"
-              go get "github.com/mtgo-labs/mtgo@$VERSION"
+              go get "$dependency"
               go mod tidy
-              go vet ./...
-              go test ./...
+              if [ "$IS_WASM" = "true" ]; then
+                GOOS=js GOARCH=wasm go build ./...
+              else
+                go vet ./...
+                go test ./...
+              fi
             )
             echo "::endgroup::"
           done

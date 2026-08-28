@@ -3,6 +3,7 @@ package tg
 import (
 	"bytes"
 	"fmt"
+	"sync"
 )
 
 // TLObject is the interface implemented by all TL serializable types.
@@ -21,8 +22,19 @@ func EncodeTLObject(b *bytes.Buffer, obj TLObject) error {
 
 // Registry maps TL constructor IDs to factory functions that decode the
 // corresponding TLObject from a reader. Generated types register themselves
-// during init.
+// during init; the registry is safe for concurrent reads at that point.
+// For runtime registration use [RegisterType].
 var Registry = map[uint32]func(*Reader) (TLObject, error){}
+
+var registryMu sync.RWMutex
+
+// RegisterType adds a constructor to the Registry at runtime. Safe for
+// concurrent use. Most types are registered during init() and don't need this.
+func RegisterType(id uint32, factory func(*Reader) (TLObject, error)) {
+	registryMu.Lock()
+	Registry[id] = factory
+	registryMu.Unlock()
+}
 
 // ReadTLObject reads a TLObject from r by looking up the constructor ID in
 // Registry and calling the associated factory function.
@@ -31,7 +43,9 @@ func ReadTLObject(r *Reader) (TLObject, error) {
 	if err != nil {
 		return nil, err
 	}
+	registryMu.RLock()
 	constructor, ok := Registry[id]
+	registryMu.RUnlock()
 	if !ok {
 		return nil, &UnknownConstructorError{ID: id}
 	}
@@ -74,6 +88,29 @@ func (e *vectorTooLargeError) Error() string {
 }
 
 const maxVectorElements uint32 = 100000
+
+// VectorTypeID is the universal constructor ID for boxed TL vectors.
+const VectorTypeID uint32 = 0x1cb5c415
+
+type invalidVectorConstructorError struct {
+	got uint32
+}
+
+func (e *invalidVectorConstructorError) Error() string {
+	return fmt.Sprintf("tg: invalid vector constructor: got 0x%08x, want 0x%08x", e.got, VectorTypeID)
+}
+
+// CheckVectorConstructor validates the universal constructor prefix of a boxed vector.
+func CheckVectorConstructor(id uint32) error {
+	if id != VectorTypeID {
+		return &invalidVectorConstructorError{got: id}
+	}
+	return nil
+}
+
+func checkVectorConstructor(id uint32) error {
+	return CheckVectorConstructor(id)
+}
 
 // CheckVectorCount rejects implausibly large TL vector lengths before allocating.
 func CheckVectorCount(count uint32) error {

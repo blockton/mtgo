@@ -45,7 +45,7 @@ const (
 )
 
 // ResourceCeilings are configurable limits enforced by OverloadController and
-// the InboundUpdateQueue/OutboundBatcher. All-zero = disabled (backward compat).
+// the OutboundBatcher. All-zero = disabled (backward compat).
 type ResourceCeilings struct {
 	MaxInFlightRPCs         int
 	MaxInboundDepth         int
@@ -111,6 +111,9 @@ func (c *OverloadController) Enabled() bool { return c != nil && c.maxInFlight >
 //   - PriorityLow: fast-fails immediately if at capacity.
 //   - PriorityHigh: waits up to AdmissionDeadline for a slot; fails if exceeded.
 func (c *OverloadController) Admit(ctx context.Context, priority int) (func(), error) {
+	if c.closed.Load() {
+		return nil, &OverloadError{Info: OverloadInfo{Reason: "controller_closed"}}
+	}
 	if !c.Enabled() {
 		return func() {}, nil // disabled: always admit
 	}

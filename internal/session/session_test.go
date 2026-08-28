@@ -36,6 +36,20 @@ type testStorage struct {
 	apiID   int32
 }
 
+type blockingAuthStorage struct {
+	*testStorage
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingAuthStorage) SetAuthKey(v []byte) error {
+	if len(v) != 0 {
+		close(s.entered)
+		<-s.release
+	}
+	return s.testStorage.SetAuthKey(v)
+}
+
 func newTestStorage() *testStorage {
 	return &testStorage{}
 }
@@ -197,6 +211,44 @@ func TestSessionAckTracking(t *testing.T) {
 	}
 }
 
+func TestRequiresAck(t *testing.T) {
+	if requiresAck(0) || requiresAck(2) {
+		t.Fatal("even sequence numbers should not require acknowledgements")
+	}
+	if !requiresAck(1) || !requiresAck(3) {
+		t.Fatal("odd sequence numbers should require acknowledgements")
+	}
+}
+
+func TestRawContainerAcknowledgesOnlyContentMessages(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	s.ackCh = make(chan int64, 2)
+
+	contentID := makeServerMsgID()
+	serviceID := makeServerMsgID()
+	body := encodeTLObject(t, &tg.MsgsAck{})
+	var container bytes.Buffer
+	tg.WriteInt(&container, 2)
+	writeRawMTProtoMessage(&container, contentID, 1, body)
+	writeRawMTProtoMessage(&container, serviceID, 2, body)
+
+	s.handleRawContainer(container.Bytes())
+
+	select {
+	case got := <-s.ackCh:
+		if got != contentID {
+			t.Fatalf("ack msg_id = %d, want %d", got, contentID)
+		}
+	default:
+		t.Fatal("content-related child was not acknowledged")
+	}
+	select {
+	case got := <-s.ackCh:
+		t.Fatalf("unexpected acknowledgement for msg_id=%d", got)
+	default:
+	}
+}
+
 func TestSessionRawMsgsAckCleansTrackedContainer(t *testing.T) {
 	s := newSessionWithAuthKey(t)
 	s.TrackContainer(1001, []int64{2001, 2002})
@@ -217,18 +269,35 @@ func TestSessionRawMsgResendReqNacksTrackedContainer(t *testing.T) {
 
 	var body bytes.Buffer
 	tg.WriteVectorLong(&body, []int64{1001})
-	s.handleRawMsgResendReq(body.Bytes())
+	s.handleRawMsgResendReq(5000, body.Bytes())
 
+	// The tracked container must be cleaned up (NACKed).
 	if got := s.containerTracker.AckContainer(1001); len(got) != 0 {
 		t.Fatalf("AckContainer() after raw resend req = %v, want empty", got)
 	}
+	// Per the MTProto spec, an un-resendable msg_resend_req must NOT be acked
+	// (the server does not ack its own outbound msg_ids); the client replies
+	// with msgs_state_info instead. So ackCh must be empty.
 	select {
 	case got := <-s.ackCh:
-		if got != 1001 {
-			t.Fatalf("ackCh got %d, want 1001", got)
-		}
+		t.Fatalf("ackCh got %d, want no ack for un-resendable msg_resend_req", got)
 	default:
-		t.Fatal("ackCh missing resend request ack")
+	}
+}
+
+func TestSessionRawMsgResendReqDoesNotAckUnknown(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	s.ackCh = make(chan int64, 1024)
+
+	var body bytes.Buffer
+	// 9999 is neither tracked nor a known pending msg_id.
+	tg.WriteVectorLong(&body, []int64{9999})
+	s.handleRawMsgResendReq(5001, body.Bytes())
+
+	select {
+	case got := <-s.ackCh:
+		t.Fatalf("ackCh got %d for unknown msg_id; expected no ack", got)
+	default:
 	}
 }
 
@@ -237,6 +306,23 @@ type mockTransport struct {
 	recvCh    chan []byte
 	done      chan struct{}
 	closeOnce sync.Once
+}
+
+type httpWaitMockTransport struct {
+	*mockTransport
+	waitFrame chan []byte
+}
+
+func (m *httpWaitMockTransport) HTTPWaitParams() (maxDelay, waitAfter, maxWait int32, enabled bool) {
+	return 10, 20, 30_000, true
+}
+
+func (m *httpWaitMockTransport) StartHTTPWait(frame func(context.Context) ([]byte, error)) {
+	encrypted, err := frame(context.Background())
+	if err != nil {
+		return
+	}
+	m.waitFrame <- encrypted
 }
 
 func newMockTransport() *mockTransport {
@@ -288,6 +374,29 @@ func (m *mockTransport) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
+type closeGateTransport struct {
+	*mockTransport
+	closeEntered chan struct{}
+	releaseClose chan struct{}
+	observeOnce  sync.Once
+}
+
+func newCloseGateTransport() *closeGateTransport {
+	return &closeGateTransport{
+		mockTransport: newMockTransport(),
+		closeEntered:  make(chan struct{}),
+		releaseClose:  make(chan struct{}),
+	}
+}
+
+func (t *closeGateTransport) Close() error {
+	t.observeOnce.Do(func() {
+		close(t.closeEntered)
+		<-t.releaseClose
+	})
+	return t.mockTransport.Close()
+}
+
 func makeAuthKey() []byte {
 	return make([]byte, 256)
 }
@@ -335,7 +444,7 @@ func writeRawMTProtoMessage(b *bytes.Buffer, msgID int64, seqNo uint32, body []b
 	b.Write(body)
 }
 
-func newSessionWithAuthKey(t *testing.T) *Session {
+func newSessionWithAuthKey(t testing.TB) *Session {
 	t.Helper()
 	dc := DataCenter{ID: 2}
 	st := newTestStorage()
@@ -357,8 +466,17 @@ func startTestWorkers(s *Session, mt *mockTransport) func() {
 	s.pingCbs = make(map[int64]chan struct{})
 	s.done = make(chan struct{})
 	s.sm.forceSetState(StateActive)
-	go func() { _ = s.readLoop(ctx) }()
-	go func() { _ = s.ackLoop(ctx) }()
+	started := make(chan struct{}, 2)
+	go func() {
+		started <- struct{}{}
+		_ = s.readLoop(ctx)
+	}()
+	go func() {
+		started <- struct{}{}
+		_ = s.ackLoop(ctx)
+	}()
+	<-started
+	<-started
 	return func() {
 		cancel()
 		close(s.done)
@@ -372,6 +490,106 @@ func TestSessionSetDispatchConfigNoOp(t *testing.T) {
 	s.SetDispatchConfig(7, 33)
 	s.SetDispatchConfig(0, 0)
 	s.SetDispatchConfig(-1, -1)
+}
+
+func TestSetOnNewSession(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+
+	called := make(chan struct {
+		firstMsgID int64
+		uniqueID   int64
+		serverSalt int64
+	}, 1)
+
+	s.SetOnNewSession(func(firstMsgID, uniqueID, serverSalt int64) {
+		called <- struct {
+			firstMsgID int64
+			uniqueID   int64
+			serverSalt int64
+		}{firstMsgID, uniqueID, serverSalt}
+	})
+
+	// Simulate the raw new_session_created handler path.
+	// The body layout is: constructor(4) + first_msg_id(8) +
+	// unique_id(8) + server_salt(8) = 28 bytes.
+	body := make([]byte, 28)
+	binary.LittleEndian.PutUint32(body[0:4], tg.NewSessionCreatedTypeID)
+	binary.LittleEndian.PutUint64(body[4:12], 0x1122334455667788)
+	binary.LittleEndian.PutUint64(body[12:20], 0x5ABBCCDDEEFF0011)
+	binary.LittleEndian.PutUint64(body[20:28], 0x5EADBEEFCAFEBABE)
+
+	handled := s.handleRawPacket(makeServerMsgID(), body)
+	if !handled {
+		t.Fatal("handleRawPacket did not handle new_session_created")
+	}
+
+	select {
+	case result := <-called:
+		if result.firstMsgID != 0x1122334455667788 {
+			t.Errorf("firstMsgID = %x, want %x", result.firstMsgID, 0x1122334455667788)
+		}
+		if result.uniqueID != 0x5ABBCCDDEEFF0011 {
+			t.Errorf("uniqueID = %x, want %x", result.uniqueID, 0x5ABBCCDDEEFF0011)
+		}
+		if result.serverSalt != 0x5EADBEEFCAFEBABE {
+			t.Errorf("serverSalt = %x, want %x", result.serverSalt, 0x5EADBEEFCAFEBABE)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("callback was not called")
+	}
+}
+
+func TestSetOnNewSessionNoCallback(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+
+	// fireNewSession should not panic when no callback is set.
+	s.fireNewSession(1, 2, 3)
+}
+
+func TestSetOnNewSessionNilCallback(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+
+	s.SetOnNewSession(nil)
+	// fireNewSession should not panic when callback is nil.
+	s.fireNewSession(1, 2, 3)
+}
+
+func TestSetOnNewSessionDecodedPath(t *testing.T) {
+	// Verify the decoded TL-object path also fires.
+	s := newSessionWithAuthKey(t)
+
+	called := make(chan struct {
+		firstMsgID int64
+		uniqueID   int64
+		serverSalt int64
+	}, 1)
+
+	s.SetOnNewSession(func(firstMsgID, uniqueID, serverSalt int64) {
+		called <- struct {
+			firstMsgID int64
+			uniqueID   int64
+			serverSalt int64
+		}{firstMsgID, uniqueID, serverSalt}
+	})
+
+	// Simulate the decoded path via fireNewSession (which is what
+	// the decoded handler calls after StoreSimple).
+	s.fireNewSession(42, 99, 777)
+
+	select {
+	case result := <-called:
+		if result.firstMsgID != 42 {
+			t.Errorf("firstMsgID = %d, want 42", result.firstMsgID)
+		}
+		if result.uniqueID != 99 {
+			t.Errorf("uniqueID = %d, want 99", result.uniqueID)
+		}
+		if result.serverSalt != 777 {
+			t.Errorf("serverSalt = %d, want 777", result.serverSalt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("callback was not called")
+	}
 }
 
 func TestSessionSendAndWait(t *testing.T) {
@@ -956,6 +1174,218 @@ func TestSessionInvokeRawRetriesShortRPCResult(t *testing.T) {
 	}
 }
 
+// TestSessionInvokeRawBackoffCancellable verifies that cancelling the caller's
+// context during the retry backoff aborts InvokeRaw promptly, rather than
+// blocking for the full backoff duration.
+func TestSessionInvokeRawBackoffCancellable(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	mt := newMockTransport()
+	s.SetTransport(mt)
+
+	cleanup := startTestWorkers(s, mt)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan struct {
+		data []byte
+		err  error
+	}, 1)
+	go func() {
+		// retries=2 so a backoff is scheduled before the second attempt; a short
+		// timeout makes the first attempt fail fast and set backoff=100ms.
+		data, err := s.InvokeRaw(ctx, &tg.PingRequest{PingID: 123}, 2, 50*time.Millisecond)
+		resultCh <- struct {
+			data []byte
+			err  error
+		}{data, err}
+	}()
+
+	// Wait for the first attempt to be sent, then cancel during the backoff.
+	<-mt.sendCh
+	cancel()
+	start := time.Now()
+
+	select {
+	case result := <-resultCh:
+		elapsed := time.Since(start)
+		if result.err == nil {
+			t.Fatal("InvokeRaw() expected error after ctx cancel, got nil")
+		}
+		// The error must reflect cancellation, not a timeout/exhaustion.
+		if !errors.Is(result.err, context.Canceled) {
+			t.Fatalf("InvokeRaw() error = %v, want context.Canceled", result.err)
+		}
+		// The initial backoff is 100ms; with an uninterruptible time.Sleep the
+		// call would block ~100ms before re-checking ctx. A cancellable select
+		// returns near-instantly. Allow slack for scheduling but stay well under.
+		if elapsed > 50*time.Millisecond {
+			t.Fatalf("InvokeRaw() took %v to return after cancel; backoff not interruptible", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("InvokeRaw() did not return promptly after ctx cancel (backoff not interruptible)")
+	}
+}
+
+// TestSessionInvokeBackoffCancellable is the Invoke counterpart.
+func TestSessionInvokeBackoffCancellable(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	mt := newMockTransport()
+	s.SetTransport(mt)
+
+	cleanup := startTestWorkers(s, mt)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan struct {
+		obj tg.TLObject
+		err error
+	}, 1)
+	go func() {
+		obj, err := s.Invoke(ctx, &tg.PingRequest{PingID: 123}, 2, 50*time.Millisecond)
+		resultCh <- struct {
+			obj tg.TLObject
+			err error
+		}{obj, err}
+	}()
+
+	<-mt.sendCh
+	cancel()
+	start := time.Now()
+
+	select {
+	case result := <-resultCh:
+		elapsed := time.Since(start)
+		if !errors.Is(result.err, context.Canceled) {
+			t.Fatalf("Invoke() error = %v, want context.Canceled", result.err)
+		}
+		if elapsed > 50*time.Millisecond {
+			t.Fatalf("Invoke() took %v to return after cancel; backoff not interruptible", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Invoke() did not return promptly after ctx cancel (backoff not interruptible)")
+	}
+}
+
+func TestRequestStopSynchronouslyClosesAndDetachesTransport(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	tp := newCloseGateTransport()
+	s.SetTransport(tp)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	s.runMu.Lock()
+	s.runCancel = runCancel
+	s.runDone = runDone
+	s.runMu.Unlock()
+
+	returned := make(chan struct{})
+	var gotDone <-chan struct{}
+	go func() {
+		gotDone = s.RequestStop()
+		close(returned)
+	}()
+	select {
+	case <-tp.closeEntered:
+	case <-time.After(time.Second):
+		t.Fatal("RequestStop did not close the transport")
+	}
+	select {
+	case <-runCtx.Done():
+	default:
+		t.Fatal("RequestStop closed the transport before cancelling the run context")
+	}
+	s.mu.RLock()
+	attached := s.transport
+	s.mu.RUnlock()
+	if attached != nil {
+		t.Fatal("RequestStop did not detach the transport before Close")
+	}
+	late := newMockTransport()
+	lateConnectDone := make(chan error, 1)
+	go func() { lateConnectDone <- s.ConnectContext(context.Background(), late) }()
+	select {
+	case <-returned:
+		t.Fatal("RequestStop returned before transport Close completed")
+	default:
+	}
+	close(tp.releaseClose)
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("RequestStop did not return after transport Close completed")
+	}
+	if gotDone != runDone {
+		t.Fatal("RequestStop returned the wrong lifecycle completion channel")
+	}
+	select {
+	case err := <-lateConnectDone:
+		if !errors.Is(err, ErrSessionClosed) {
+			t.Fatalf("ConnectContext during RequestStop = %v, want ErrSessionClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("late ConnectContext did not return after transport Close")
+	}
+	if late.IsConnected() {
+		t.Fatal("ConnectContext left a late transport open during RequestStop")
+	}
+	close(runDone)
+	if second := s.RequestStop(); second != runDone {
+		t.Fatal("second RequestStop returned the wrong completion channel")
+	}
+	later := newMockTransport()
+	s.SetTransport(later)
+	if later.IsConnected() {
+		t.Fatal("SetTransport attached a transport after RequestStop")
+	}
+}
+
+func TestRequestStopWaitsForConcurrentHandleClose(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	tp := newCloseGateTransport()
+	s.SetTransport(tp)
+	s.done = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	handleDone := make(chan error, 1)
+	go func() {
+		handleDone <- s.handleClose(ctx)
+	}()
+	cancel()
+	select {
+	case <-tp.closeEntered:
+	case <-time.After(time.Second):
+		t.Fatal("handleClose did not start transport Close")
+	}
+
+	requestEntered := make(chan struct{})
+	requestReturned := make(chan struct{})
+	go func() {
+		close(requestEntered)
+		s.RequestStop()
+		close(requestReturned)
+	}()
+	<-requestEntered
+	select {
+	case <-requestReturned:
+		t.Fatal("RequestStop returned while handleClose was still closing the transport")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(tp.releaseClose)
+	select {
+	case <-requestReturned:
+	case <-time.After(time.Second):
+		t.Fatal("RequestStop did not return after concurrent transport Close completed")
+	}
+	select {
+	case err := <-handleDone:
+		if err != nil {
+			t.Fatalf("handleClose() = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handleClose did not return")
+	}
+}
+
 func TestSessionStartStop(t *testing.T) {
 	s := newSessionWithAuthKey(t)
 	mt := newMockTransport()
@@ -1000,6 +1430,286 @@ func TestSessionStartStop(t *testing.T) {
 	}
 }
 
+func TestSessionStopAfterStartFailure(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	mt := newMockTransport()
+	s.SetTransport(mt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := s.StartContext(ctx); err == nil {
+		t.Fatal("StartContext unexpectedly succeeded")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Stop blocked after StartContext failure")
+	}
+
+	select {
+	case <-mt.done:
+	default:
+		t.Fatal("transport was not closed after initial ping failure")
+	}
+}
+
+func TestConnectWithAuthContextSerializesAuthentication(t *testing.T) {
+	s, err := NewSession(DataCenter{ID: 2}, newTestStorage(), "test", "1", "en", "en")
+	if err != nil {
+		t.Fatalf("NewSession() = %v", err)
+	}
+	firstEntered := make(chan struct{})
+	firstRelease := make(chan struct{})
+	secondEntered := make(chan struct{})
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		firstDone <- s.ConnectWithAuthContext(t.Context(), newMockTransport(), func(Transport) (*AuthResult, error) {
+			close(firstEntered)
+			<-firstRelease
+			return nil, errors.New("first auth failed")
+		})
+	}()
+	<-firstEntered
+	go func() {
+		secondDone <- s.ConnectWithAuthContext(t.Context(), newMockTransport(), func(Transport) (*AuthResult, error) {
+			close(secondEntered)
+			return nil, errors.New("second auth failed")
+		})
+	}()
+	select {
+	case <-secondEntered:
+		t.Fatal("concurrent ConnectWithAuthContext entered authFunc")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(firstRelease)
+	if err := <-firstDone; err == nil {
+		t.Fatal("first ConnectWithAuthContext unexpectedly succeeded")
+	}
+	select {
+	case <-secondEntered:
+	case <-time.After(time.Second):
+		t.Fatal("second ConnectWithAuthContext did not enter after first returned")
+	}
+	if err := <-secondDone; err == nil {
+		t.Fatal("second ConnectWithAuthContext unexpectedly succeeded")
+	}
+}
+
+func TestStopDuringConnectWithAuthPreventsStartupAndPersistence(t *testing.T) {
+	st := newTestStorage()
+	s, err := NewSession(DataCenter{ID: 2}, st, "test", "1", "en", "en")
+	if err != nil {
+		t.Fatalf("NewSession() = %v", err)
+	}
+	tp := newMockTransport()
+	authEntered := make(chan struct{})
+	authRelease := make(chan struct{})
+	connectDone := make(chan error, 1)
+	go func() {
+		connectDone <- s.ConnectWithAuthContext(context.Background(), tp, func(Transport) (*AuthResult, error) {
+			close(authEntered)
+			<-authRelease
+			return &AuthResult{AuthKey: make([]byte, 256), ServerTime: int32(time.Now().Unix())}, nil
+		})
+	}()
+	<-authEntered
+
+	stopDone := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop blocked during authentication")
+	}
+	select {
+	case <-tp.done:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not close authentication transport")
+	}
+	close(authRelease)
+	select {
+	case err := <-connectDone:
+		if !errors.Is(err, ErrSessionClosed) {
+			t.Fatalf("ConnectWithAuthContext() = %v, want ErrSessionClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ConnectWithAuthContext did not return after Stop")
+	}
+	if len(st.authKey) != 0 {
+		t.Fatalf("persisted auth key length = %d, want 0", len(st.authKey))
+	}
+	if s.IsConnected() {
+		t.Fatal("session became active after Stop")
+	}
+}
+
+func TestStopWaitsForInFlightAuthKeyPersistence(t *testing.T) {
+	st := &blockingAuthStorage{
+		testStorage: newTestStorage(),
+		entered:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	s, err := NewSession(DataCenter{ID: 2}, st, "test", "1", "en", "en")
+	if err != nil {
+		t.Fatalf("NewSession() = %v", err)
+	}
+	tp := newMockTransport()
+	connectDone := make(chan error, 1)
+	go func() {
+		connectDone <- s.ConnectWithAuthContext(context.Background(), tp, func(Transport) (*AuthResult, error) {
+			return &AuthResult{AuthKey: make([]byte, 256), ServerTime: int32(time.Now().Unix())}, nil
+		})
+	}()
+	<-st.entered
+
+	stopDone := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+		t.Fatal("Stop returned while auth key persistence was in flight")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(st.release)
+	select {
+	case err := <-connectDone:
+		if !errors.Is(err, ErrSessionClosed) {
+			t.Fatalf("ConnectWithAuthContext() = %v, want ErrSessionClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ConnectWithAuthContext did not return")
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not finish after auth persistence completed")
+	}
+	if len(st.authKey) != 0 {
+		t.Fatalf("persisted auth key length = %d, want 0", len(st.authKey))
+	}
+}
+
+func TestStopCancelsStartupPing(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	mt := newMockTransport()
+	connectDone := make(chan error, 1)
+	go func() {
+		connectDone <- s.ConnectContext(context.Background(), mt)
+	}()
+	select {
+	case <-mt.sendCh:
+	case <-time.After(time.Second):
+		t.Fatal("ConnectContext did not send startup ping")
+	}
+	stopDone := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopDone)
+	}()
+	select {
+	case err := <-connectDone:
+		if err == nil {
+			t.Fatal("ConnectContext unexpectedly succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not cancel startup ping")
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return after startup cancellation")
+	}
+}
+
+func TestDispatchUpdateBackpressuresAtCapacity(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	for range cap(s.updateSem) {
+		s.updateSem <- struct{}{}
+	}
+
+	called := make(chan struct{})
+	s.SetUpdateHandler(func(tg.TLObject) { close(called) })
+	dispatched := make(chan struct{})
+	go func() {
+		s.dispatchUpdate(&tg.PingRequest{PingID: 1})
+		close(dispatched)
+	}()
+
+	select {
+	case <-dispatched:
+		t.Fatal("dispatchUpdate returned while the semaphore was full")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	<-s.updateSem
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("update was dropped after capacity became available")
+	}
+	select {
+	case <-dispatched:
+	case <-time.After(time.Second):
+		t.Fatal("dispatchUpdate did not return after capacity became available")
+	}
+}
+
+func TestSessionStartsEncryptedHTTPWaitAfterPing(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	mt := &httpWaitMockTransport{
+		mockTransport: newMockTransport(),
+		waitFrame:     make(chan []byte, 1),
+	}
+	s.SetTransport(mt)
+	s.pingInterval = time.Hour
+
+	go func() {
+		sentData := <-mt.sendCh
+		message := unpackIncoming(sentData, s)
+		ping, ok := message.Body.(*tg.PingRequest)
+		if !ok {
+			return
+		}
+		mt.recvCh <- makeEncryptedResponse(s, makeServerMsgID(), 0, &tg.Pong{
+			MsgID:  message.MsgID,
+			PingID: ping.PingID,
+		})
+	}()
+
+	if err := s.Start(3 * time.Second); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+	select {
+	case encrypted := <-mt.waitFrame:
+		message := unpackIncoming(encrypted, s)
+		if message == nil {
+			t.Fatal("http_wait frame did not decrypt")
+		}
+		wait, ok := message.Body.(*tg.HTTPWait)
+		if !ok {
+			t.Fatalf("poll body = %T, want *tg.HTTPWait", message.Body)
+		}
+		if wait.MaxDelay != 10 || wait.WaitAfter != 20 || wait.MaxWait != 30_000 {
+			t.Fatalf("http_wait = %+v, want 10/20/30000", wait)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("encrypted http_wait was not started")
+	}
+}
+
 func TestSessionAckLoopFlushesAcks(t *testing.T) {
 	s := newSessionWithAuthKey(t)
 	mt := newMockTransport()
@@ -1011,6 +1721,8 @@ func TestSessionAckLoopFlushesAcks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = s.ackLoop(ctx) }()
 
+	s.addAck(1)
+	s.addAck(2)
 	s.addAck(1)
 	s.addAck(2)
 
@@ -1246,7 +1958,7 @@ func TestWriteCircuitBreakerTrips(t *testing.T) {
 	s.SetTransport(ft)
 	s.done = make(chan struct{})
 	s.sm.forceSetState(StateActive)
-	s.writeBreakerThreshold = 3
+	s.writeBreakerThreshold.Store(3)
 
 	writeErr := fmt.Errorf("write failed")
 	ft.SetFail(writeErr)
@@ -1276,7 +1988,7 @@ func TestWriteCircuitBreakerResetsOnSuccess(t *testing.T) {
 	s.SetTransport(ft)
 	s.done = make(chan struct{})
 	s.sm.forceSetState(StateActive)
-	s.writeBreakerThreshold = 3
+	s.writeBreakerThreshold.Store(3)
 
 	ft.SetFail(fmt.Errorf("write failed"))
 
@@ -1295,8 +2007,8 @@ func TestWriteCircuitBreakerResetsOnSuccess(t *testing.T) {
 		t.Fatalf("expected success after clearing fail, got %v", err)
 	}
 
-	if s.consecWriteFailures != 0 {
-		t.Fatalf("consecWriteFailures=%d, want 0 after success", s.consecWriteFailures)
+	if s.consecWriteFailures.Load() != 0 {
+		t.Fatalf("consecWriteFailures=%d, want 0 after success", s.consecWriteFailures.Load())
 	}
 
 	ft.SetFail(fmt.Errorf("write failed"))
@@ -1316,7 +2028,7 @@ func TestWriteCircuitBreakerDisabledWhenZero(t *testing.T) {
 	s.SetTransport(ft)
 	s.done = make(chan struct{})
 	s.sm.forceSetState(StateActive)
-	s.writeBreakerThreshold = 0
+	s.writeBreakerThreshold.Store(0)
 
 	ft.SetFail(fmt.Errorf("write failed"))
 
@@ -1626,8 +2338,8 @@ func TestRegisterBeforeWrite(t *testing.T) {
 func TestSetWriteBreakerThreshold(t *testing.T) {
 	s := newSessionWithAuthKey(t)
 	s.SetWriteBreakerThreshold(5)
-	if s.writeBreakerThreshold != 5 {
-		t.Fatalf("threshold=%d, want 5", s.writeBreakerThreshold)
+	if int(s.writeBreakerThreshold.Load()) != 5 {
+		t.Fatalf("threshold=%d, want 5", s.writeBreakerThreshold.Load())
 	}
 }
 
@@ -1817,7 +2529,7 @@ func TestCompletedCallsFreePendingCapacity(t *testing.T) {
 	}
 }
 
-func TestWriteBreakerTriggersGroupCancel(t *testing.T) {
+func TestWriteBreakerTrippedCancelsErrgroup(t *testing.T) {
 	s := newSessionWithAuthKey(t)
 	ft := newFailingTransport()
 	s.SetTransport(ft)
@@ -1825,7 +2537,7 @@ func TestWriteBreakerTriggersGroupCancel(t *testing.T) {
 	s.ackCh = make(chan int64, 1024)
 	s.pingCbs = make(map[int64]chan struct{})
 	s.sm.forceSetState(StateActive)
-	s.writeBreakerThreshold = 2
+	s.writeBreakerThreshold.Store(2)
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 	defer parentCancel()
@@ -1836,6 +2548,7 @@ func TestWriteBreakerTriggersGroupCancel(t *testing.T) {
 
 	ft.SetFail(fmt.Errorf("write failed"))
 
+	// Two consecutive failures should open the breaker.
 	err := s.writeEncryptedDirect(make([]byte, 10), time.Second)
 	if err == nil {
 		t.Fatal("expected error")
@@ -1849,16 +2562,59 @@ func TestWriteBreakerTriggersGroupCancel(t *testing.T) {
 		t.Fatal("breaker should be open")
 	}
 
+	// Fail-fast: the errgroup context should be cancelled to trigger
+	// immediate session shutdown + reconnect.
 	select {
 	case <-g.ctx.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("group context should have been cancelled")
+	case <-time.After(time.Second):
+		t.Fatal("errgroup context should be cancelled when breaker opens (fail-fast)")
+	}
+
+	// Subsequent writes should still get ErrWriteCircuitOpen.
+	err = s.writeEncryptedDirect(make([]byte, 10), time.Second)
+	if !errors.Is(err, ErrWriteCircuitOpen) {
+		t.Fatalf("expected ErrWriteCircuitOpen, got %v", err)
 	}
 
 	close(s.done)
 }
 
-func TestQuickAckSentOnUpdatesClass(t *testing.T) {
+func TestResetWriteBreaker(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	ft := newFailingTransport()
+	s.SetTransport(ft)
+	s.done = make(chan struct{})
+	s.sm.forceSetState(StateActive)
+	s.writeBreakerThreshold.Store(2)
+
+	// Open the breaker.
+	ft.SetFail(fmt.Errorf("write failed"))
+	_ = s.writeEncryptedDirect(make([]byte, 10), time.Second)
+	_ = s.writeEncryptedDirect(make([]byte, 10), time.Second)
+	if !s.writeBreakerOpen.Load() {
+		t.Fatal("breaker should be open")
+	}
+
+	// Reset should clear it.
+	s.ResetWriteBreaker()
+	if s.writeBreakerOpen.Load() {
+		t.Fatal("breaker should be closed after reset")
+	}
+	if s.consecWriteFailures.Load() != 0 {
+		t.Fatalf("consecWriteFailures=%d after reset", s.consecWriteFailures.Load())
+	}
+
+	// Writes should succeed again after reset.
+	ft.SetFail(nil)
+	err := s.writeEncryptedDirect(make([]byte, 10), time.Second)
+	if err != nil {
+		t.Fatalf("expected success after reset, got %v", err)
+	}
+
+	close(s.done)
+}
+
+func TestUpdateQueuesSingleAck(t *testing.T) {
 	s := newSessionWithAuthKey(t)
 	mt := newMockTransport()
 	s.SetTransport(mt)
@@ -1868,39 +2624,45 @@ func TestQuickAckSentOnUpdatesClass(t *testing.T) {
 		updateCh <- obj
 	})
 
-	cleanup := startTestWorkers(s, mt)
-	defer cleanup()
+	ctx, cancel := context.WithCancel(context.Background())
+	s.ackCh = make(chan int64, 1024)
+	s.done = make(chan struct{})
+	s.sm.forceSetState(StateActive)
+	readDone := make(chan struct{})
+	go func() {
+		_ = s.readLoop(ctx)
+		close(readDone)
+	}()
+	defer func() {
+		cancel()
+		close(s.done)
+		_ = mt.Close()
+		<-readDone
+	}()
 
 	update := &tg.Updates{Updates: []tg.UpdateClass{}, Users: []tg.UserClass{}, Chats: []tg.ChatClass{}, Date: 12345, Seq: 1}
 	serverMsgID := makeServerMsgID()
-	encrypted := makeEncryptedResponse(s, serverMsgID, uint32(s.msgFactory.AllocateSeqNo(false)), update)
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		mt.recvCh <- encrypted
-	}()
+	encrypted := makeEncryptedResponse(s, serverMsgID, 1, update)
+	mt.recvCh <- encrypted
 
 	select {
-	case data := <-mt.sendCh:
-		msg, _, err := crypto.Unpack(data, s.sessionIDBytes(), s.authKey, s.authKeyID)
-		if err != nil {
-			t.Fatalf("unpack: %v", err)
+	case <-updateCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for update")
+	}
+
+	select {
+	case got := <-s.ackCh:
+		if got != serverMsgID {
+			t.Fatalf("ack msg_id = %d, want %d", got, serverMsgID)
 		}
-		if msg == nil || msg.Body == nil {
-			t.Fatal("no message body")
-		}
-		ack, ok := msg.Body.(*tg.MsgsAck)
-		if !ok {
-			t.Fatalf("expected MsgsAck, got %T", msg.Body)
-		}
-		if len(ack.MsgIds) != 1 {
-			t.Fatalf("expected 1 ack msg ID, got %d", len(ack.MsgIds))
-		}
-		if ack.MsgIds[0] != serverMsgID {
-			t.Errorf("ack msg ID = %d, want %d", ack.MsgIds[0], serverMsgID)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for quick ACK")
+	default:
+		t.Fatal("update acknowledgement was not queued")
+	}
+	select {
+	case got := <-s.ackCh:
+		t.Fatalf("duplicate acknowledgement queued for msg_id=%d", got)
+	default:
 	}
 }
 
@@ -1942,125 +2704,6 @@ func TestBatchAckSentOnNonUpdates(t *testing.T) {
 			}
 		case <-time.After(100 * time.Millisecond):
 		}
-	}
-}
-
-func TestPendingManagerMarkAllUnknown(t *testing.T) {
-	pm := NewPendingManager()
-
-	// Register 3 pending queries.
-	h1, err := pm.Register(1001, false)
-	if err != nil {
-		t.Fatalf("Register(1001): %v", err)
-	}
-	_ = h1
-	h2, err := pm.Register(1002, false)
-	if err != nil {
-		t.Fatalf("Register(1002): %v", err)
-	}
-	_ = h2
-	h3, err := pm.Register(1003, true)
-	if err != nil {
-		t.Fatalf("Register(1003): %v", err)
-	}
-	_ = h3
-
-	// Mark all as unknown.
-	ids := pm.MarkAllUnknown()
-	if len(ids) != 3 {
-		t.Fatalf("MarkAllUnknown: got %d ids, want 3", len(ids))
-	}
-
-	// GetUnknown should return the same IDs.
-	unknown := pm.GetUnknown()
-	if len(unknown) != 3 {
-		t.Fatalf("GetUnknown: got %d, want 3", len(unknown))
-	}
-}
-
-func TestPendingManagerRejectExcessUnknowns(t *testing.T) {
-	pm := NewPendingManager()
-
-	// Register 5 pending queries.
-	for i := int64(0); i < 5; i++ {
-		_, err := pm.Register(2001+i, false)
-		if err != nil {
-			t.Fatalf("Register(%d): %v", 2001+i, err)
-		}
-	}
-
-	// Mark all as unknown.
-	pm.MarkAllUnknown()
-
-	// Reject excess with cap of 3 — should reject 2.
-	rejected := pm.RejectExcessUnknowns(3)
-	if rejected != 2 {
-		t.Fatalf("RejectExcessUnknowns(3): rejected %d, want 2", rejected)
-	}
-
-	// Should have 3 remaining.
-	remaining := pm.GetUnknown()
-	if len(remaining) != 3 {
-		t.Fatalf("GetUnknown after reject: got %d, want 3", len(remaining))
-	}
-}
-
-func TestPendingManagerRejectExcessUnknownsUnderCap(t *testing.T) {
-	pm := NewPendingManager()
-
-	// Register 2 queries, cap is 5 — no rejection needed.
-	for i := int64(0); i < 2; i++ {
-		_, _ = pm.Register(3001+i, false)
-	}
-	pm.MarkAllUnknown()
-
-	rejected := pm.RejectExcessUnknowns(5)
-	if rejected != 0 {
-		t.Fatalf("RejectExcessUnknowns(5): rejected %d, want 0", rejected)
-	}
-
-	remaining := pm.GetUnknown()
-	if len(remaining) != 2 {
-		t.Fatalf("GetUnknown: got %d, want 2", len(remaining))
-	}
-}
-
-func TestSessionPrepareForReconnect(t *testing.T) {
-	s := newSessionWithAuthKey(t)
-	mt := newMockTransport()
-	s.SetTransport(mt)
-
-	cleanup := startTestWorkers(s, mt)
-	defer cleanup()
-
-	// Register some pending queries.
-	_, _ = s.pending.Register(4001, false)
-	_, _ = s.pending.Register(4002, false)
-	_, _ = s.pending.Register(4003, true)
-
-	// PrepareForReconnect should return all pending IDs.
-	ids := s.PrepareForReconnect()
-	if len(ids) != 3 {
-		t.Fatalf("PrepareForReconnect: got %d ids, want 3", len(ids))
-	}
-
-	// HasUnknownQueries should be true.
-	if !s.HasUnknownQueries() {
-		t.Fatal("HasUnknownQueries should be true")
-	}
-}
-
-func TestSessionHasUnknownQueriesEmpty(t *testing.T) {
-	s := newSessionWithAuthKey(t)
-	mt := newMockTransport()
-	s.SetTransport(mt)
-
-	cleanup := startTestWorkers(s, mt)
-	defer cleanup()
-
-	// No pending queries.
-	if s.HasUnknownQueries() {
-		t.Fatal("HasUnknownQueries should be false when no pending queries")
 	}
 }
 
@@ -2107,6 +2750,63 @@ func TestDCOptionPoolFindBest(t *testing.T) {
 	}
 }
 
+func TestDCOptionPoolCandidates(t *testing.T) {
+	pool := NewDCOptionPool(2, 100*time.Millisecond)
+	dc1 := DataCenter{ID: 2}
+	dc2 := DataCenter{ID: 2, IPv6: true}
+	dc3 := DataCenter{ID: 3}
+
+	pool.AddOption(dc1)
+	pool.AddOption(dc2)
+	pool.AddOption(dc3)
+	pool.RecordSuccess(dc2)
+	pool.RecordFailure(dc1)
+
+	candidates, err := pool.Candidates(0)
+	if err != nil {
+		t.Fatalf("Candidates: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("Candidates len = %d, want 1 while dc1 is cooling down", len(candidates))
+	}
+	if candidates[0] != dc2 {
+		t.Fatalf("Candidates should prefer healthy dc2 first, got %v", candidates)
+	}
+
+	dc3Candidates, err := pool.CandidatesForDC(3, 0)
+	if err != nil {
+		t.Fatalf("CandidatesForDC(3): %v", err)
+	}
+	if len(dc3Candidates) != 1 || dc3Candidates[0] != dc3 {
+		t.Fatalf("CandidatesForDC(3) = %v, want [%v]", dc3Candidates, dc3)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	candidates, err = pool.Candidates(0)
+	if err != nil {
+		t.Fatalf("Candidates after cool-down: %v", err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("Candidates len after cool-down = %d, want 2", len(candidates))
+	}
+	if candidates[1] != dc1 {
+		t.Fatalf("Candidates should retry cooled-down failed endpoint last, got %v", candidates)
+	}
+}
+
+func TestDataCenterDynamicAddress(t *testing.T) {
+	dc := DataCenter{ID: 2, IPAddress: "203.0.113.10", PortValue: 1443}
+	if got := dc.Address(); got != "203.0.113.10" {
+		t.Fatalf("Address() = %q, want dynamic address", got)
+	}
+	if got := dc.Port(); got != 1443 {
+		t.Fatalf("Port() = %d, want dynamic port", got)
+	}
+	if got := dc.String(); got != "DC2(203.0.113.10:1443)" {
+		t.Fatalf("String() = %q", got)
+	}
+}
+
 func TestDCOptionPoolCoolDown(t *testing.T) {
 	pool := NewDCOptionPool(2, 100*time.Millisecond)
 
@@ -2137,9 +2837,10 @@ func TestDCOptionPoolCoolDown(t *testing.T) {
 
 func TestConnectionPoolGetPut(t *testing.T) {
 	pool := NewConnectionPool(10 * time.Second)
+	defer pool.Close()
 
 	dc := DataCenter{ID: 2}
-	conn := &mockTransport{}
+	conn := newMockTransport()
 
 	// Cache miss.
 	_, ok := pool.Get(2, dc)
@@ -2164,34 +2865,44 @@ func TestConnectionPoolGetPut(t *testing.T) {
 	if ok {
 		t.Fatal("Get should return false after consumption")
 	}
+	pool.Close()
+	if !conn.IsConnected() {
+		t.Fatal("consumed connection should be owned by caller, not closed by pool")
+	}
+	conn.Close()
 }
 
 func TestConnectionPoolExpiry(t *testing.T) {
-	pool := NewConnectionPool(100 * time.Millisecond)
+	pool := NewConnectionPool(10 * time.Millisecond)
+	defer pool.Close()
 
 	dc := DataCenter{ID: 2}
-	conn := &mockTransport{}
+	conn := newMockTransport()
 
 	pool.Put(2, dc, conn)
 
-	// Wait for expiry.
-	time.Sleep(150 * time.Millisecond)
-
-	// Should miss (expired).
-	_, ok := pool.Get(2, dc)
-	if ok {
-		t.Fatal("Get should return false after expiry")
+	select {
+	case <-conn.done:
+	case <-time.After(time.Second):
+		t.Fatal("expired connection was not closed automatically")
+	}
+	if pool.Count() != 0 {
+		t.Fatalf("Count after automatic expiry = %d, want 0", pool.Count())
 	}
 }
 
 func TestConnectionPoolEvict(t *testing.T) {
 	pool := NewConnectionPool(10 * time.Second)
+	defer pool.Close()
 
 	dc := DataCenter{ID: 2}
-	conn := &mockTransport{}
+	conn := newMockTransport()
 
 	pool.Put(2, dc, conn)
 	pool.Evict(2, dc)
+	if conn.IsConnected() {
+		t.Fatal("Evict should close the cached connection")
+	}
 
 	_, ok := pool.Get(2, dc)
 	if ok {
@@ -2200,17 +2911,24 @@ func TestConnectionPoolEvict(t *testing.T) {
 }
 
 func TestConnectionPoolPurge(t *testing.T) {
-	pool := NewConnectionPool(100 * time.Millisecond)
+	pool := NewConnectionPool(10 * time.Second)
+	defer pool.Close()
 
 	dc := DataCenter{ID: 2}
-	pool.Put(2, dc, &mockTransport{})
-	pool.Put(2, DataCenter{ID: 2, IPv6: true}, &mockTransport{})
+	conn1 := newMockTransport()
+	conn2 := newMockTransport()
+	pool.Put(2, dc, conn1)
+	pool.Put(2, DataCenter{ID: 2, IPv6: true}, conn2)
 
 	if pool.Count() != 2 {
 		t.Fatalf("Count before purge: %d, want 2", pool.Count())
 	}
 
-	time.Sleep(150 * time.Millisecond)
+	pool.mu.Lock()
+	for i := range pool.entries {
+		pool.entries[i].CreatedAt = time.Now().Add(-time.Minute)
+	}
+	pool.mu.Unlock()
 
 	purged := pool.Purge()
 	if purged != 2 {
@@ -2219,28 +2937,47 @@ func TestConnectionPoolPurge(t *testing.T) {
 	if pool.Count() != 0 {
 		t.Fatalf("Count after purge: %d, want 0", pool.Count())
 	}
+	if conn1.IsConnected() || conn2.IsConnected() {
+		t.Fatal("Purge should close expired cached connections")
+	}
 }
 
-func TestRouteQuery(t *testing.T) {
-	tests := []struct {
-		name  string
-		query tg.TLObject
-		want  SessionSlotType
-	}{
-		{"upload.saveFilePart", &tg.UploadSaveFilePartRequest{}, SlotUpload},
-		{"upload.saveBigFilePart", &tg.UploadSaveBigFilePartRequest{}, SlotUpload},
-		{"upload.getFile", &tg.UploadGetFileRequest{}, SlotDownload},
-		{"upload.getWebFile", &tg.UploadGetWebFileRequest{}, SlotDownload},
-		{"ping (main)", &tg.PingRequest{}, SlotMain},
-		{"sendMessage (main)", &tg.MessagesSendMessageRequest{}, SlotMain},
+func TestConnectionPoolReplaceAndClear(t *testing.T) {
+	pool := NewConnectionPool(10 * time.Second)
+	dc := DataCenter{ID: 2}
+	first := newMockTransport()
+	second := newMockTransport()
+
+	pool.Put(2, dc, first)
+	pool.Put(2, dc, second)
+	if first.IsConnected() {
+		t.Fatal("replacing an endpoint should close the previous connection")
+	}
+	if pool.Count() != 1 {
+		t.Fatalf("Count after replacement = %d, want 1", pool.Count())
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := RouteQuery(tt.query)
-			if got != tt.want {
-				t.Errorf("RouteQuery(%T) = %v, want %v", tt.query, got, tt.want)
-			}
-		})
+	pool.Clear()
+	if second.IsConnected() {
+		t.Fatal("Clear should close cached connections")
+	}
+	if pool.Count() != 0 {
+		t.Fatalf("Count after Clear = %d, want 0", pool.Count())
+	}
+
+	third := newMockTransport()
+	pool.Put(2, dc, third)
+	if pool.Count() != 1 {
+		t.Fatal("Clear should leave the pool reusable")
+	}
+	pool.Close()
+	if third.IsConnected() {
+		t.Fatal("Close should close cached connections")
+	}
+
+	fourth := newMockTransport()
+	pool.Put(2, dc, fourth)
+	if fourth.IsConnected() {
+		t.Fatal("Put after Close should close the rejected connection")
 	}
 }

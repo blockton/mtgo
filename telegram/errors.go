@@ -23,6 +23,10 @@ var (
 	// ErrAlreadyConnected is returned when Connect is called on a client that is
 	// already connected to Telegram.
 	ErrAlreadyConnected = errors.New("client: already connected")
+	// ErrAuthKeyInvalidated indicates that Telegram permanently rejected or
+	// revoked the main authorization key. Automatic reconnect stays disabled
+	// until an explicit Connect starts recovery with cleared storage.
+	ErrAuthKeyInvalidated = errors.New("client: auth key invalidated")
 	// ErrPeerNotFound is returned when a peer (user, chat, or channel) cannot be
 	// resolved from the given identifier.
 	ErrPeerNotFound = errors.New("client: peer not found")
@@ -44,6 +48,13 @@ var (
 	// ErrMigrationUnknown is returned when the server requests migration to an
 	// unknown data center that the client has no configuration for.
 	ErrMigrationUnknown = errors.New("client: dc migration to unknown dc")
+	// ErrUpdateHandlerFailed is returned when a registered update handler
+	// returns an error or panics during dispatch.
+	ErrUpdateHandlerFailed = errors.New("telegram: update handler failed")
+	// ErrRPCDropped is returned when an in-flight RPC is dropped by the client
+	// via DropRPC (rpc_drop_answer). The original Invoke caller receives this
+	// error wrapped in the session error chain.
+	ErrRPCDropped = errors.New("telegram: rpc dropped by client")
 )
 
 // Client initialization and authentication errors.
@@ -198,6 +209,9 @@ var (
 	// ErrSocks4Domain is returned when a SOCKS4 proxy receives a domain name
 	// instead of an IP address, which SOCKS4 does not support.
 	ErrProxyResponseTooLarge = errors.New("response too large")
+	// ErrNetworkChanged identifies an application-reported interface or route
+	// change that invalidated active transports.
+	ErrNetworkChanged = errors.New("telegram: network changed")
 )
 
 // Business, secret chat, forum, and group call errors.
@@ -336,6 +350,40 @@ func (e *ReconnectError) Error() string {
 
 func (e *ReconnectError) Unwrap() error { return e.Err }
 
+// AuthKeyInvalidatedError reports permanent loss of the main authorization
+// key. Cause is the server error; Cleanup is non-nil if credential removal had
+// already failed when this value was returned. If lifecycle ownership delays
+// cleanup, the first error can omit a later cleanup failure; subsequent client
+// operations still remain fail-closed until cleanup completes successfully.
+type AuthKeyInvalidatedError struct {
+	Cause   error
+	Cleanup error
+}
+
+func (e *AuthKeyInvalidatedError) Error() string {
+	if e == nil {
+		return ErrAuthKeyInvalidated.Error()
+	}
+	if e.Cleanup != nil {
+		return fmt.Sprintf("%v: %v (cleanup: %v)", ErrAuthKeyInvalidated, e.Cause, e.Cleanup)
+	}
+	return fmt.Sprintf("%v: %v", ErrAuthKeyInvalidated, e.Cause)
+}
+
+func (e *AuthKeyInvalidatedError) Unwrap() []error {
+	if e == nil {
+		return []error{ErrAuthKeyInvalidated}
+	}
+	errs := []error{ErrAuthKeyInvalidated}
+	if e.Cause != nil {
+		errs = append(errs, e.Cause)
+	}
+	if e.Cleanup != nil {
+		errs = append(errs, e.Cleanup)
+	}
+	return errs
+}
+
 // MigrationError indicates a failure to migrate the connection to a different DC.
 //
 // Example:
@@ -379,3 +427,25 @@ type UnsafeMigrationError struct {
 func (e *UnsafeMigrationError) Error() string {
 	return fmt.Sprintf("client: refusing to retry non-idempotent %q after dc migration to dc %d", e.Method, e.TargetDC)
 }
+
+// RPCDeliveryState describes what Telegram confirmed before a disconnect.
+type RPCDeliveryState string
+
+const (
+	RPCDeliveryUnknown  RPCDeliveryState = "unknown"
+	RPCDeliveryReceived RPCDeliveryState = "received"
+)
+
+// RPCDeliveryError is returned instead of automatically replaying a query
+// that may already have produced side effects.
+type RPCDeliveryError struct {
+	Method string
+	State  RPCDeliveryState
+	Err    error
+}
+
+func (e *RPCDeliveryError) Error() string {
+	return fmt.Sprintf("client: RPC %s delivery is %s; automatic replay refused: %v", e.Method, e.State, e.Err)
+}
+
+func (e *RPCDeliveryError) Unwrap() error { return e.Err }

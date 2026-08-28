@@ -4,6 +4,7 @@ package tg
 
 import (
 	"bytes"
+	"fmt"
 )
 
 // BoolClass is the interface for TL type Bool.
@@ -113,38 +114,6 @@ func DecodeTrue(r *Reader) (*True, error) {
 func init() {
 	Registry[TrueTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeTrue(r)
-	}
-}
-
-// VectorTypeID is the constructor ID for TL type vector.
-const VectorTypeID = 0x1cb5c415
-
-// Vector represents the TL constructor vector (0x1cb5c415).
-//
-// See https://core.telegram.org/constructor/vector for reference.
-type Vector struct {
-}
-
-// ConstructorID returns the TL constructor identifier 0x1cb5c415.
-func (v *Vector) ConstructorID() uint32 {
-	return VectorTypeID
-}
-
-// Encode serializes Vector to a bytes.Buffer using the TL binary protocol.
-func (v *Vector) Encode(b *bytes.Buffer) error {
-	WriteInt(b, VectorTypeID)
-	return nil
-}
-
-// DecodeVector deserializes a Vector from a reader using the TL binary protocol.
-func DecodeVector(r *Reader) (*Vector, error) {
-	v := &Vector{}
-	return v, nil
-}
-
-func init() {
-	Registry[VectorTypeID] = func(r *Reader) (TLObject, error) {
-		return DecodeVector(r)
 	}
 }
 
@@ -385,7 +354,11 @@ func DecodeInputFileStoryDocument(r *Reader) (*InputFileStoryDocument, error) {
 	if _errID != nil {
 		return nil, _errID
 	}
-	v.ID = _objID.(InputDocumentClass)
+	_cID, _okID := _objID.(InputDocumentClass)
+	if !_okID {
+		return nil, fmt.Errorf("decode: field id: unexpected type %T", _objID)
+	}
+	v.ID = _cID
 	return v, nil
 }
 
@@ -614,22 +587,29 @@ func (v *InputMediaUploadedPhoto) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaUploadedPhoto deserializes a InputMediaUploadedPhoto from a reader using the TL binary protocol.
 func DecodeInputMediaUploadedPhoto(r *Reader) (*InputMediaUploadedPhoto, error) {
 	v := &InputMediaUploadedPhoto{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Spoiler = v.Flags.Has(2)
 	v.LivePhoto = v.Flags.Has(3)
 	_objFile, _errFile := ReadTLObject(r)
 	if _errFile != nil {
 		return nil, _errFile
 	}
-	v.File = _objFile.(InputFileClass)
+	_cFile, _okFile := _objFile.(InputFileClass)
+	if !_okFile {
+		return nil, fmt.Errorf("decode: field file: unexpected type %T", _objFile)
+	}
+	v.File = _cFile
 	if v.Flags.Has(0) {
 		_vhdrStickers, _ehdrStickers := r.ReadUint32()
 		if _ehdrStickers != nil {
 			return nil, _ehdrStickers
+		}
+		if _errStickers := checkVectorConstructor(_vhdrStickers); _errStickers != nil {
+			return nil, _errStickers
 		}
 		_cntStickers, _ecntStickers := r.ReadUint32()
 		if _ecntStickers != nil {
@@ -644,9 +624,12 @@ func DecodeInputMediaUploadedPhoto(r *Reader) (*InputMediaUploadedPhoto, error) 
 			if _errStickers != nil {
 				return nil, _errStickers
 			}
-			v.Stickers[_iStickers] = _objStickers.(InputDocumentClass)
+			_cStickers, _okStickers := _objStickers.(InputDocumentClass)
+			if !_okStickers {
+				return nil, fmt.Errorf("decode: field stickers: unexpected type %T", _objStickers)
+			}
+			v.Stickers[_iStickers] = _cStickers
 		}
-		_ = _vhdrStickers
 	}
 	if v.Flags.Has(1) {
 		_rTTLSeconds, _eTTLSeconds := r.ReadInt32()
@@ -660,7 +643,11 @@ func DecodeInputMediaUploadedPhoto(r *Reader) (*InputMediaUploadedPhoto, error) 
 		if _errVideo != nil {
 			return nil, _errVideo
 		}
-		v.Video = _objVideo.(InputDocumentClass)
+		_cVideo, _okVideo := _objVideo.(InputDocumentClass)
+		if !_okVideo {
+			return nil, fmt.Errorf("decode: field video: unexpected type %T", _objVideo)
+		}
+		v.Video = _cVideo
 	}
 	return v, nil
 }
@@ -722,18 +709,22 @@ func (v *InputMediaPhoto) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaPhoto deserializes a InputMediaPhoto from a reader using the TL binary protocol.
 func DecodeInputMediaPhoto(r *Reader) (*InputMediaPhoto, error) {
 	v := &InputMediaPhoto{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Spoiler = v.Flags.Has(1)
 	v.LivePhoto = v.Flags.Has(2)
 	_objID, _errID := ReadTLObject(r)
 	if _errID != nil {
 		return nil, _errID
 	}
-	v.ID = _objID.(InputPhotoClass)
+	_cID, _okID := _objID.(InputPhotoClass)
+	if !_okID {
+		return nil, fmt.Errorf("decode: field id: unexpected type %T", _objID)
+	}
+	v.ID = _cID
 	if v.Flags.Has(0) {
 		_rTTLSeconds, _eTTLSeconds := r.ReadInt32()
 		if _eTTLSeconds != nil {
@@ -746,7 +737,11 @@ func DecodeInputMediaPhoto(r *Reader) (*InputMediaPhoto, error) {
 		if _errVideo != nil {
 			return nil, _errVideo
 		}
-		v.Video = _objVideo.(InputDocumentClass)
+		_cVideo, _okVideo := _objVideo.(InputDocumentClass)
+		if !_okVideo {
+			return nil, fmt.Errorf("decode: field video: unexpected type %T", _objVideo)
+		}
+		v.Video = _cVideo
 	}
 	return v, nil
 }
@@ -783,7 +778,11 @@ func DecodeInputMediaGeoPoint(r *Reader) (*InputMediaGeoPoint, error) {
 	if _errGeoPoint != nil {
 		return nil, _errGeoPoint
 	}
-	v.GeoPoint = _objGeoPoint.(InputGeoPointClass)
+	_cGeoPoint, _okGeoPoint := _objGeoPoint.(InputGeoPointClass)
+	if !_okGeoPoint {
+		return nil, fmt.Errorf("decode: field geo_point: unexpected type %T", _objGeoPoint)
+	}
+	v.GeoPoint = _cGeoPoint
 	return v, nil
 }
 
@@ -938,11 +937,11 @@ func (v *InputMediaUploadedDocument) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaUploadedDocument deserializes a InputMediaUploadedDocument from a reader using the TL binary protocol.
 func DecodeInputMediaUploadedDocument(r *Reader) (*InputMediaUploadedDocument, error) {
 	v := &InputMediaUploadedDocument{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.NosoundVideo = v.Flags.Has(3)
 	v.ForceFile = v.Flags.Has(4)
 	v.Spoiler = v.Flags.Has(5)
@@ -950,13 +949,21 @@ func DecodeInputMediaUploadedDocument(r *Reader) (*InputMediaUploadedDocument, e
 	if _errFile != nil {
 		return nil, _errFile
 	}
-	v.File = _objFile.(InputFileClass)
+	_cFile, _okFile := _objFile.(InputFileClass)
+	if !_okFile {
+		return nil, fmt.Errorf("decode: field file: unexpected type %T", _objFile)
+	}
+	v.File = _cFile
 	if v.Flags.Has(2) {
 		_objThumb, _errThumb := ReadTLObject(r)
 		if _errThumb != nil {
 			return nil, _errThumb
 		}
-		v.Thumb = _objThumb.(InputFileClass)
+		_cThumb, _okThumb := _objThumb.(InputFileClass)
+		if !_okThumb {
+			return nil, fmt.Errorf("decode: field thumb: unexpected type %T", _objThumb)
+		}
+		v.Thumb = _cThumb
 	}
 	_rMimeType, _eMimeType := r.ReadString()
 	if _eMimeType != nil {
@@ -966,6 +973,9 @@ func DecodeInputMediaUploadedDocument(r *Reader) (*InputMediaUploadedDocument, e
 	_vhdrAttributes, _ehdrAttributes := r.ReadUint32()
 	if _ehdrAttributes != nil {
 		return nil, _ehdrAttributes
+	}
+	if _errAttributes := checkVectorConstructor(_vhdrAttributes); _errAttributes != nil {
+		return nil, _errAttributes
 	}
 	_cntAttributes, _ecntAttributes := r.ReadUint32()
 	if _ecntAttributes != nil {
@@ -980,13 +990,19 @@ func DecodeInputMediaUploadedDocument(r *Reader) (*InputMediaUploadedDocument, e
 		if _errAttributes != nil {
 			return nil, _errAttributes
 		}
-		v.Attributes[_iAttributes] = _objAttributes.(DocumentAttributeClass)
+		_cAttributes, _okAttributes := _objAttributes.(DocumentAttributeClass)
+		if !_okAttributes {
+			return nil, fmt.Errorf("decode: field attributes: unexpected type %T", _objAttributes)
+		}
+		v.Attributes[_iAttributes] = _cAttributes
 	}
-	_ = _vhdrAttributes
 	if v.Flags.Has(0) {
 		_vhdrStickers, _ehdrStickers := r.ReadUint32()
 		if _ehdrStickers != nil {
 			return nil, _ehdrStickers
+		}
+		if _errStickers := checkVectorConstructor(_vhdrStickers); _errStickers != nil {
+			return nil, _errStickers
 		}
 		_cntStickers, _ecntStickers := r.ReadUint32()
 		if _ecntStickers != nil {
@@ -1001,16 +1017,23 @@ func DecodeInputMediaUploadedDocument(r *Reader) (*InputMediaUploadedDocument, e
 			if _errStickers != nil {
 				return nil, _errStickers
 			}
-			v.Stickers[_iStickers] = _objStickers.(InputDocumentClass)
+			_cStickers, _okStickers := _objStickers.(InputDocumentClass)
+			if !_okStickers {
+				return nil, fmt.Errorf("decode: field stickers: unexpected type %T", _objStickers)
+			}
+			v.Stickers[_iStickers] = _cStickers
 		}
-		_ = _vhdrStickers
 	}
 	if v.Flags.Has(6) {
 		_objVideoCover, _errVideoCover := ReadTLObject(r)
 		if _errVideoCover != nil {
 			return nil, _errVideoCover
 		}
-		v.VideoCover = _objVideoCover.(InputPhotoClass)
+		_cVideoCover, _okVideoCover := _objVideoCover.(InputPhotoClass)
+		if !_okVideoCover {
+			return nil, fmt.Errorf("decode: field video_cover: unexpected type %T", _objVideoCover)
+		}
+		v.VideoCover = _cVideoCover
 	}
 	if v.Flags.Has(7) {
 		_rVideoTimestamp, _eVideoTimestamp := r.ReadInt32()
@@ -1096,23 +1119,31 @@ func (v *InputMediaDocument) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaDocument deserializes a InputMediaDocument from a reader using the TL binary protocol.
 func DecodeInputMediaDocument(r *Reader) (*InputMediaDocument, error) {
 	v := &InputMediaDocument{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Spoiler = v.Flags.Has(2)
 	_objID, _errID := ReadTLObject(r)
 	if _errID != nil {
 		return nil, _errID
 	}
-	v.ID = _objID.(InputDocumentClass)
+	_cID, _okID := _objID.(InputDocumentClass)
+	if !_okID {
+		return nil, fmt.Errorf("decode: field id: unexpected type %T", _objID)
+	}
+	v.ID = _cID
 	if v.Flags.Has(3) {
 		_objVideoCover, _errVideoCover := ReadTLObject(r)
 		if _errVideoCover != nil {
 			return nil, _errVideoCover
 		}
-		v.VideoCover = _objVideoCover.(InputPhotoClass)
+		_cVideoCover, _okVideoCover := _objVideoCover.(InputPhotoClass)
+		if !_okVideoCover {
+			return nil, fmt.Errorf("decode: field video_cover: unexpected type %T", _objVideoCover)
+		}
+		v.VideoCover = _cVideoCover
 	}
 	if v.Flags.Has(4) {
 		_rVideoTimestamp, _eVideoTimestamp := r.ReadInt32()
@@ -1180,7 +1211,11 @@ func DecodeInputMediaVenue(r *Reader) (*InputMediaVenue, error) {
 	if _errGeoPoint != nil {
 		return nil, _errGeoPoint
 	}
-	v.GeoPoint = _objGeoPoint.(InputGeoPointClass)
+	_cGeoPoint, _okGeoPoint := _objGeoPoint.(InputGeoPointClass)
+	if !_okGeoPoint {
+		return nil, fmt.Errorf("decode: field geo_point: unexpected type %T", _objGeoPoint)
+	}
+	v.GeoPoint = _cGeoPoint
 	_rTitle, _eTitle := r.ReadString()
 	if _eTitle != nil {
 		return nil, _eTitle
@@ -1255,11 +1290,11 @@ func (v *InputMediaPhotoExternal) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaPhotoExternal deserializes a InputMediaPhotoExternal from a reader using the TL binary protocol.
 func DecodeInputMediaPhotoExternal(r *Reader) (*InputMediaPhotoExternal, error) {
 	v := &InputMediaPhotoExternal{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Spoiler = v.Flags.Has(1)
 	_rURL, _eURL := r.ReadString()
 	if _eURL != nil {
@@ -1336,11 +1371,11 @@ func (v *InputMediaDocumentExternal) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaDocumentExternal deserializes a InputMediaDocumentExternal from a reader using the TL binary protocol.
 func DecodeInputMediaDocumentExternal(r *Reader) (*InputMediaDocumentExternal, error) {
 	v := &InputMediaDocumentExternal{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Spoiler = v.Flags.Has(1)
 	_rURL, _eURL := r.ReadString()
 	if _eURL != nil {
@@ -1359,7 +1394,11 @@ func DecodeInputMediaDocumentExternal(r *Reader) (*InputMediaDocumentExternal, e
 		if _errVideoCover != nil {
 			return nil, _errVideoCover
 		}
-		v.VideoCover = _objVideoCover.(InputPhotoClass)
+		_cVideoCover, _okVideoCover := _objVideoCover.(InputPhotoClass)
+		if !_okVideoCover {
+			return nil, fmt.Errorf("decode: field video_cover: unexpected type %T", _objVideoCover)
+		}
+		v.VideoCover = _cVideoCover
 	}
 	if v.Flags.Has(3) {
 		_rVideoTimestamp, _eVideoTimestamp := r.ReadInt32()
@@ -1403,7 +1442,11 @@ func DecodeInputMediaGame(r *Reader) (*InputMediaGame, error) {
 	if _errID != nil {
 		return nil, _errID
 	}
-	v.ID = _objID.(InputGameClass)
+	_cID, _okID := _objID.(InputGameClass)
+	if !_okID {
+		return nil, fmt.Errorf("decode: field id: unexpected type %T", _objID)
+	}
+	v.ID = _cID
 	return v, nil
 }
 
@@ -1478,11 +1521,11 @@ func (v *InputMediaInvoice) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaInvoice deserializes a InputMediaInvoice from a reader using the TL binary protocol.
 func DecodeInputMediaInvoice(r *Reader) (*InputMediaInvoice, error) {
 	v := &InputMediaInvoice{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rTitle, _eTitle := r.ReadString()
 	if _eTitle != nil {
 		return nil, _eTitle
@@ -1498,13 +1541,21 @@ func DecodeInputMediaInvoice(r *Reader) (*InputMediaInvoice, error) {
 		if _errPhoto != nil {
 			return nil, _errPhoto
 		}
-		v.Photo = _objPhoto.(*InputWebDocument)
+		_cPhoto, _okPhoto := _objPhoto.(*InputWebDocument)
+		if !_okPhoto {
+			return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+		}
+		v.Photo = _cPhoto
 	}
 	_objInvoice, _errInvoice := ReadTLObject(r)
 	if _errInvoice != nil {
 		return nil, _errInvoice
 	}
-	v.Invoice = _objInvoice.(*Invoice)
+	_cInvoice, _okInvoice := _objInvoice.(*Invoice)
+	if !_okInvoice {
+		return nil, fmt.Errorf("decode: field invoice: unexpected type %T", _objInvoice)
+	}
+	v.Invoice = _cInvoice
 	_rPayload, _ePayload := r.ReadBytes()
 	if _ePayload != nil {
 		return nil, _ePayload
@@ -1521,7 +1572,11 @@ func DecodeInputMediaInvoice(r *Reader) (*InputMediaInvoice, error) {
 	if _errProviderData != nil {
 		return nil, _errProviderData
 	}
-	v.ProviderData = _objProviderData.(*DataJSON)
+	_cProviderData, _okProviderData := _objProviderData.(*DataJSON)
+	if !_okProviderData {
+		return nil, fmt.Errorf("decode: field provider_data: unexpected type %T", _objProviderData)
+	}
+	v.ProviderData = _cProviderData
 	if v.Flags.Has(1) {
 		_rStartParam, _eStartParam := r.ReadString()
 		if _eStartParam != nil {
@@ -1534,7 +1589,11 @@ func DecodeInputMediaInvoice(r *Reader) (*InputMediaInvoice, error) {
 		if _errExtendedMedia != nil {
 			return nil, _errExtendedMedia
 		}
-		v.ExtendedMedia = _objExtendedMedia.(InputMediaClass)
+		_cExtendedMedia, _okExtendedMedia := _objExtendedMedia.(InputMediaClass)
+		if !_okExtendedMedia {
+			return nil, fmt.Errorf("decode: field extended_media: unexpected type %T", _objExtendedMedia)
+		}
+		v.ExtendedMedia = _cExtendedMedia
 	}
 	return v, nil
 }
@@ -1599,17 +1658,21 @@ func (v *InputMediaGeoLive) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaGeoLive deserializes a InputMediaGeoLive from a reader using the TL binary protocol.
 func DecodeInputMediaGeoLive(r *Reader) (*InputMediaGeoLive, error) {
 	v := &InputMediaGeoLive{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Stopped = v.Flags.Has(0)
 	_objGeoPoint, _errGeoPoint := ReadTLObject(r)
 	if _errGeoPoint != nil {
 		return nil, _errGeoPoint
 	}
-	v.GeoPoint = _objGeoPoint.(InputGeoPointClass)
+	_cGeoPoint, _okGeoPoint := _objGeoPoint.(InputGeoPointClass)
+	if !_okGeoPoint {
+		return nil, fmt.Errorf("decode: field geo_point: unexpected type %T", _objGeoPoint)
+	}
+	v.GeoPoint = _cGeoPoint
 	if v.Flags.Has(2) {
 		_rHeading, _eHeading := r.ReadInt32()
 		if _eHeading != nil {
@@ -1708,16 +1771,20 @@ func (v *InputMediaPoll) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaPoll deserializes a InputMediaPoll from a reader using the TL binary protocol.
 func DecodeInputMediaPoll(r *Reader) (*InputMediaPoll, error) {
 	v := &InputMediaPoll{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPoll, _errPoll := ReadTLObject(r)
 	if _errPoll != nil {
 		return nil, _errPoll
 	}
-	v.Poll = _objPoll.(*Poll)
+	_cPoll, _okPoll := _objPoll.(*Poll)
+	if !_okPoll {
+		return nil, fmt.Errorf("decode: field poll: unexpected type %T", _objPoll)
+	}
+	v.Poll = _cPoll
 	if v.Flags.Has(0) {
 		_vvCorrectAnswers, _veCorrectAnswers := r.ReadVectorInt()
 		if _veCorrectAnswers != nil {
@@ -1730,7 +1797,11 @@ func DecodeInputMediaPoll(r *Reader) (*InputMediaPoll, error) {
 		if _errAttachedMedia != nil {
 			return nil, _errAttachedMedia
 		}
-		v.AttachedMedia = _objAttachedMedia.(InputMediaClass)
+		_cAttachedMedia, _okAttachedMedia := _objAttachedMedia.(InputMediaClass)
+		if !_okAttachedMedia {
+			return nil, fmt.Errorf("decode: field attached_media: unexpected type %T", _objAttachedMedia)
+		}
+		v.AttachedMedia = _cAttachedMedia
 	}
 	if v.Flags.Has(1) {
 		_rSolution, _eSolution := r.ReadString()
@@ -1743,6 +1814,9 @@ func DecodeInputMediaPoll(r *Reader) (*InputMediaPoll, error) {
 		_vhdrSolutionEntities, _ehdrSolutionEntities := r.ReadUint32()
 		if _ehdrSolutionEntities != nil {
 			return nil, _ehdrSolutionEntities
+		}
+		if _errSolutionEntities := checkVectorConstructor(_vhdrSolutionEntities); _errSolutionEntities != nil {
+			return nil, _errSolutionEntities
 		}
 		_cntSolutionEntities, _ecntSolutionEntities := r.ReadUint32()
 		if _ecntSolutionEntities != nil {
@@ -1757,16 +1831,23 @@ func DecodeInputMediaPoll(r *Reader) (*InputMediaPoll, error) {
 			if _errSolutionEntities != nil {
 				return nil, _errSolutionEntities
 			}
-			v.SolutionEntities[_iSolutionEntities] = _objSolutionEntities.(MessageEntityClass)
+			_cSolutionEntities, _okSolutionEntities := _objSolutionEntities.(MessageEntityClass)
+			if !_okSolutionEntities {
+				return nil, fmt.Errorf("decode: field solution_entities: unexpected type %T", _objSolutionEntities)
+			}
+			v.SolutionEntities[_iSolutionEntities] = _cSolutionEntities
 		}
-		_ = _vhdrSolutionEntities
 	}
 	if v.Flags.Has(2) {
 		_objSolutionMedia, _errSolutionMedia := ReadTLObject(r)
 		if _errSolutionMedia != nil {
 			return nil, _errSolutionMedia
 		}
-		v.SolutionMedia = _objSolutionMedia.(InputMediaClass)
+		_cSolutionMedia, _okSolutionMedia := _objSolutionMedia.(InputMediaClass)
+		if !_okSolutionMedia {
+			return nil, fmt.Errorf("decode: field solution_media: unexpected type %T", _objSolutionMedia)
+		}
+		v.SolutionMedia = _cSolutionMedia
 	}
 	return v, nil
 }
@@ -1841,7 +1922,11 @@ func DecodeInputMediaStory(r *Reader) (*InputMediaStory, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(InputPeerClass)
+	_cPeer, _okPeer := _objPeer.(InputPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rID, _eID := r.ReadInt32()
 	if _eID != nil {
 		return nil, _eID
@@ -1897,11 +1982,11 @@ func (v *InputMediaWebPage) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaWebPage deserializes a InputMediaWebPage from a reader using the TL binary protocol.
 func DecodeInputMediaWebPage(r *Reader) (*InputMediaWebPage, error) {
 	v := &InputMediaWebPage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.ForceLargeMedia = v.Flags.Has(0)
 	v.ForceSmallMedia = v.Flags.Has(1)
 	v.Optional = v.Flags.Has(2)
@@ -1961,11 +2046,11 @@ func (v *InputMediaPaidMedia) Encode(b *bytes.Buffer) error {
 // DecodeInputMediaPaidMedia deserializes a InputMediaPaidMedia from a reader using the TL binary protocol.
 func DecodeInputMediaPaidMedia(r *Reader) (*InputMediaPaidMedia, error) {
 	v := &InputMediaPaidMedia{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rStarsAmount, _eStarsAmount := r.ReadInt64()
 	if _eStarsAmount != nil {
 		return nil, _eStarsAmount
@@ -1974,6 +2059,9 @@ func DecodeInputMediaPaidMedia(r *Reader) (*InputMediaPaidMedia, error) {
 	_vhdrExtendedMedia, _ehdrExtendedMedia := r.ReadUint32()
 	if _ehdrExtendedMedia != nil {
 		return nil, _ehdrExtendedMedia
+	}
+	if _errExtendedMedia := checkVectorConstructor(_vhdrExtendedMedia); _errExtendedMedia != nil {
+		return nil, _errExtendedMedia
 	}
 	_cntExtendedMedia, _ecntExtendedMedia := r.ReadUint32()
 	if _ecntExtendedMedia != nil {
@@ -1988,9 +2076,12 @@ func DecodeInputMediaPaidMedia(r *Reader) (*InputMediaPaidMedia, error) {
 		if _errExtendedMedia != nil {
 			return nil, _errExtendedMedia
 		}
-		v.ExtendedMedia[_iExtendedMedia] = _objExtendedMedia.(InputMediaClass)
+		_cExtendedMedia, _okExtendedMedia := _objExtendedMedia.(InputMediaClass)
+		if !_okExtendedMedia {
+			return nil, fmt.Errorf("decode: field extended_media: unexpected type %T", _objExtendedMedia)
+		}
+		v.ExtendedMedia[_iExtendedMedia] = _cExtendedMedia
 	}
-	_ = _vhdrExtendedMedia
 	if v.Flags.Has(0) {
 		_rPayload, _ePayload := r.ReadString()
 		if _ePayload != nil {
@@ -2033,7 +2124,11 @@ func DecodeInputMediaTodo(r *Reader) (*InputMediaTodo, error) {
 	if _errTodo != nil {
 		return nil, _errTodo
 	}
-	v.Todo = _objTodo.(*TodoList)
+	_cTodo, _okTodo := _objTodo.(*TodoList)
+	if !_okTodo {
+		return nil, fmt.Errorf("decode: field todo: unexpected type %T", _objTodo)
+	}
+	v.Todo = _cTodo
 	return v, nil
 }
 
@@ -2525,11 +2620,11 @@ func (v *DCOption) Encode(b *bytes.Buffer) error {
 // DecodeDCOption deserializes a DCOption from a reader using the TL binary protocol.
 func DecodeDCOption(r *Reader) (*DCOption, error) {
 	v := &DCOption{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.IPv6 = v.Flags.Has(0)
 	v.MediaOnly = v.Flags.Has(1)
 	v.TcpoOnly = v.Flags.Has(2)
@@ -2798,11 +2893,11 @@ func (v *Config) Encode(b *bytes.Buffer) error {
 // DecodeConfig deserializes a Config from a reader using the TL binary protocol.
 func DecodeConfig(r *Reader) (*Config, error) {
 	v := &Config{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.DefaultP2pContacts = v.Flags.Has(3)
 	v.PreloadFeaturedStickers = v.Flags.Has(4)
 	v.RevokePmInbox = v.Flags.Has(6)
@@ -2832,6 +2927,9 @@ func DecodeConfig(r *Reader) (*Config, error) {
 	if _ehdrDCOptions != nil {
 		return nil, _ehdrDCOptions
 	}
+	if _errDCOptions := checkVectorConstructor(_vhdrDCOptions); _errDCOptions != nil {
+		return nil, _errDCOptions
+	}
 	_cntDCOptions, _ecntDCOptions := r.ReadUint32()
 	if _ecntDCOptions != nil {
 		return nil, _ecntDCOptions
@@ -2845,9 +2943,12 @@ func DecodeConfig(r *Reader) (*Config, error) {
 		if _errDCOptions != nil {
 			return nil, _errDCOptions
 		}
-		v.DCOptions[_iDCOptions] = _objDCOptions.(*DCOption)
+		_cDCOptions, _okDCOptions := _objDCOptions.(*DCOption)
+		if !_okDCOptions {
+			return nil, fmt.Errorf("decode: field dc_options: unexpected type %T", _objDCOptions)
+		}
+		v.DCOptions[_iDCOptions] = _cDCOptions
 	}
-	_ = _vhdrDCOptions
 	_rDCTxtDomainName, _eDCTxtDomainName := r.ReadString()
 	if _eDCTxtDomainName != nil {
 		return nil, _eDCTxtDomainName
@@ -3046,7 +3147,11 @@ func DecodeConfig(r *Reader) (*Config, error) {
 		if _errReactionsDefault != nil {
 			return nil, _errReactionsDefault
 		}
-		v.ReactionsDefault = _objReactionsDefault.(ReactionClass)
+		_cReactionsDefault, _okReactionsDefault := _objReactionsDefault.(ReactionClass)
+		if !_okReactionsDefault {
+			return nil, fmt.Errorf("decode: field reactions_default: unexpected type %T", _objReactionsDefault)
+		}
+		v.ReactionsDefault = _cReactionsDefault
 	}
 	if v.Flags.Has(16) {
 		_rAutologinToken, _eAutologinToken := r.ReadString()
@@ -3135,7 +3240,7 @@ const ReplyKeyboardForceReplyTypeID = 0x86b40b08
 const ReplyKeyboardMarkupTypeID = 0x85dd99d1
 
 // ReplyInlineMarkupTypeID is the constructor ID for TL type replyInlineMarkup.
-const ReplyInlineMarkupTypeID = 0x48a30254
+const ReplyInlineMarkupTypeID = 0xb2b15770
 
 // isReplyMarkup marks ReplyKeyboardHide as implementing the ReplyMarkupClass interface.
 func (*ReplyKeyboardHide) isReplyMarkup() {}
@@ -3180,11 +3285,11 @@ func (v *ReplyKeyboardHide) Encode(b *bytes.Buffer) error {
 // DecodeReplyKeyboardHide deserializes a ReplyKeyboardHide from a reader using the TL binary protocol.
 func DecodeReplyKeyboardHide(r *Reader) (*ReplyKeyboardHide, error) {
 	v := &ReplyKeyboardHide{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Selective = v.Flags.Has(2)
 	return v, nil
 }
@@ -3237,11 +3342,11 @@ func (v *ReplyKeyboardForceReply) Encode(b *bytes.Buffer) error {
 // DecodeReplyKeyboardForceReply deserializes a ReplyKeyboardForceReply from a reader using the TL binary protocol.
 func DecodeReplyKeyboardForceReply(r *Reader) (*ReplyKeyboardForceReply, error) {
 	v := &ReplyKeyboardForceReply{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.SingleUse = v.Flags.Has(1)
 	v.Selective = v.Flags.Has(2)
 	if v.Flags.Has(3) {
@@ -3269,6 +3374,7 @@ type ReplyKeyboardMarkup struct {
 	SingleUse   bool                 `json:"single_use,omitempty"`
 	Selective   bool                 `json:"selective,omitempty"`
 	Persistent  bool                 `json:"persistent,omitempty"`
+	ForceReply  bool                 `json:"force_reply,omitempty"`
 	Rows        []*KeyboardButtonRow `json:"rows,omitempty"`
 	Placeholder string               `json:"placeholder,omitempty"`
 }
@@ -3286,6 +3392,9 @@ func (v *ReplyKeyboardMarkup) SetFlags() {
 	}
 	if v.Persistent {
 		v.Flags.Set(4)
+	}
+	if v.ForceReply {
+		v.Flags.Set(5)
 	}
 	if v.Placeholder != "" {
 		v.Flags.Set(3)
@@ -3316,18 +3425,22 @@ func (v *ReplyKeyboardMarkup) Encode(b *bytes.Buffer) error {
 // DecodeReplyKeyboardMarkup deserializes a ReplyKeyboardMarkup from a reader using the TL binary protocol.
 func DecodeReplyKeyboardMarkup(r *Reader) (*ReplyKeyboardMarkup, error) {
 	v := &ReplyKeyboardMarkup{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Resize = v.Flags.Has(0)
 	v.SingleUse = v.Flags.Has(1)
 	v.Selective = v.Flags.Has(2)
 	v.Persistent = v.Flags.Has(4)
+	v.ForceReply = v.Flags.Has(5)
 	_vhdrRows, _ehdrRows := r.ReadUint32()
 	if _ehdrRows != nil {
 		return nil, _ehdrRows
+	}
+	if _errRows := checkVectorConstructor(_vhdrRows); _errRows != nil {
+		return nil, _errRows
 	}
 	_cntRows, _ecntRows := r.ReadUint32()
 	if _ecntRows != nil {
@@ -3342,9 +3455,12 @@ func DecodeReplyKeyboardMarkup(r *Reader) (*ReplyKeyboardMarkup, error) {
 		if _errRows != nil {
 			return nil, _errRows
 		}
-		v.Rows[_iRows] = _objRows.(*KeyboardButtonRow)
+		_cRows, _okRows := _objRows.(*KeyboardButtonRow)
+		if !_okRows {
+			return nil, fmt.Errorf("decode: field rows: unexpected type %T", _objRows)
+		}
+		v.Rows[_iRows] = _cRows
 	}
-	_ = _vhdrRows
 	if v.Flags.Has(3) {
 		_rPlaceholder, _ePlaceholder := r.ReadString()
 		if _ePlaceholder != nil {
@@ -3361,14 +3477,23 @@ func init() {
 	}
 }
 
-// ReplyInlineMarkup represents the TL constructor replyInlineMarkup (0x48a30254).
+// ReplyInlineMarkup represents the TL constructor replyInlineMarkup (0xb2b15770).
 //
 // See https://core.telegram.org/constructor/replyInlineMarkup for reference.
 type ReplyInlineMarkup struct {
-	Rows []*KeyboardButtonRow `json:"rows,omitempty"`
+	Flags      Fields                     `json:"-"`
+	ForceReply bool                       `json:"force_reply,omitempty"`
+	Rows       []*KeyboardInlineButtonRow `json:"rows,omitempty"`
 }
 
-// ConstructorID returns the TL constructor identifier 0x48a30254.
+// SetFlags computes flags from non-zero optional fields.
+func (v *ReplyInlineMarkup) SetFlags() {
+	if v.ForceReply {
+		v.Flags.Set(5)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0xb2b15770.
 func (v *ReplyInlineMarkup) ConstructorID() uint32 {
 	return ReplyInlineMarkupTypeID
 }
@@ -3376,6 +3501,8 @@ func (v *ReplyInlineMarkup) ConstructorID() uint32 {
 // Encode serializes ReplyInlineMarkup to a bytes.Buffer using the TL binary protocol.
 func (v *ReplyInlineMarkup) Encode(b *bytes.Buffer) error {
 	WriteInt(b, ReplyInlineMarkupTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
 	WriteInt(b, 0x1cb5c415)
 	WriteInt(b, uint32(len(v.Rows)))
 	for _, _item := range v.Rows {
@@ -3387,9 +3514,18 @@ func (v *ReplyInlineMarkup) Encode(b *bytes.Buffer) error {
 // DecodeReplyInlineMarkup deserializes a ReplyInlineMarkup from a reader using the TL binary protocol.
 func DecodeReplyInlineMarkup(r *Reader) (*ReplyInlineMarkup, error) {
 	v := &ReplyInlineMarkup{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.ForceReply = v.Flags.Has(5)
 	_vhdrRows, _ehdrRows := r.ReadUint32()
 	if _ehdrRows != nil {
 		return nil, _ehdrRows
+	}
+	if _errRows := checkVectorConstructor(_vhdrRows); _errRows != nil {
+		return nil, _errRows
 	}
 	_cntRows, _ecntRows := r.ReadUint32()
 	if _ecntRows != nil {
@@ -3398,15 +3534,18 @@ func DecodeReplyInlineMarkup(r *Reader) (*ReplyInlineMarkup, error) {
 	if _errRows := checkVectorCount(_cntRows); _errRows != nil {
 		return nil, _errRows
 	}
-	v.Rows = make([]*KeyboardButtonRow, _cntRows)
+	v.Rows = make([]*KeyboardInlineButtonRow, _cntRows)
 	for _iRows := range v.Rows {
 		_objRows, _errRows := ReadTLObject(r)
 		if _errRows != nil {
 			return nil, _errRows
 		}
-		v.Rows[_iRows] = _objRows.(*KeyboardButtonRow)
+		_cRows, _okRows := _objRows.(*KeyboardInlineButtonRow)
+		if !_okRows {
+			return nil, fmt.Errorf("decode: field rows: unexpected type %T", _objRows)
+		}
+		v.Rows[_iRows] = _cRows
 	}
-	_ = _vhdrRows
 	return v, nil
 }
 
@@ -3707,6 +3846,9 @@ func DecodeCDNConfig(r *Reader) (*CDNConfig, error) {
 	if _ehdrPublicKeys != nil {
 		return nil, _ehdrPublicKeys
 	}
+	if _errPublicKeys := checkVectorConstructor(_vhdrPublicKeys); _errPublicKeys != nil {
+		return nil, _errPublicKeys
+	}
 	_cntPublicKeys, _ecntPublicKeys := r.ReadUint32()
 	if _ecntPublicKeys != nil {
 		return nil, _ecntPublicKeys
@@ -3720,9 +3862,12 @@ func DecodeCDNConfig(r *Reader) (*CDNConfig, error) {
 		if _errPublicKeys != nil {
 			return nil, _errPublicKeys
 		}
-		v.PublicKeys[_iPublicKeys] = _objPublicKeys.(*CDNPublicKey)
+		_cPublicKeys, _okPublicKeys := _objPublicKeys.(*CDNPublicKey)
+		if !_okPublicKeys {
+			return nil, fmt.Errorf("decode: field public_keys: unexpected type %T", _objPublicKeys)
+		}
+		v.PublicKeys[_iPublicKeys] = _cPublicKeys
 	}
-	_ = _vhdrPublicKeys
 	return v, nil
 }
 
@@ -3867,11 +4012,11 @@ func (v *LangPackStringPluralized) Encode(b *bytes.Buffer) error {
 // DecodeLangPackStringPluralized deserializes a LangPackStringPluralized from a reader using the TL binary protocol.
 func DecodeLangPackStringPluralized(r *Reader) (*LangPackStringPluralized, error) {
 	v := &LangPackStringPluralized{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rKey, _eKey := r.ReadString()
 	if _eKey != nil {
 		return nil, _eKey
@@ -4025,11 +4170,11 @@ func (v *LangPackLanguage) Encode(b *bytes.Buffer) error {
 // DecodeLangPackLanguage deserializes a LangPackLanguage from a reader using the TL binary protocol.
 func DecodeLangPackLanguage(r *Reader) (*LangPackLanguage, error) {
 	v := &LangPackLanguage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Official = v.Flags.Has(0)
 	v.Rtl = v.Flags.Has(2)
 	v.Beta = v.Flags.Has(3)
@@ -4277,7 +4422,11 @@ func DecodeRecentMeURLChatInvite(r *Reader) (*RecentMeURLChatInvite, error) {
 	if _errChatInvite != nil {
 		return nil, _errChatInvite
 	}
-	v.ChatInvite = _objChatInvite.(ChatInviteClass)
+	_cChatInvite, _okChatInvite := _objChatInvite.(ChatInviteClass)
+	if !_okChatInvite {
+		return nil, fmt.Errorf("decode: field chat_invite: unexpected type %T", _objChatInvite)
+	}
+	v.ChatInvite = _cChatInvite
 	return v, nil
 }
 
@@ -4320,7 +4469,11 @@ func DecodeRecentMeURLStickerSet(r *Reader) (*RecentMeURLStickerSet, error) {
 	if _errSet != nil {
 		return nil, _errSet
 	}
-	v.Set = _objSet.(StickerSetCoveredClass)
+	_cSet, _okSet := _objSet.(StickerSetCoveredClass)
+	if !_okSet {
+		return nil, fmt.Errorf("decode: field set: unexpected type %T", _objSet)
+	}
+	v.Set = _cSet
 	return v, nil
 }
 
@@ -4377,16 +4530,20 @@ func (v *InputSingleMedia) Encode(b *bytes.Buffer) error {
 // DecodeInputSingleMedia deserializes a InputSingleMedia from a reader using the TL binary protocol.
 func DecodeInputSingleMedia(r *Reader) (*InputSingleMedia, error) {
 	v := &InputSingleMedia{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objMedia, _errMedia := ReadTLObject(r)
 	if _errMedia != nil {
 		return nil, _errMedia
 	}
-	v.Media = _objMedia.(InputMediaClass)
+	_cMedia, _okMedia := _objMedia.(InputMediaClass)
+	if !_okMedia {
+		return nil, fmt.Errorf("decode: field media: unexpected type %T", _objMedia)
+	}
+	v.Media = _cMedia
 	_rRandomID, _eRandomID := r.ReadInt64()
 	if _eRandomID != nil {
 		return nil, _eRandomID
@@ -4402,6 +4559,9 @@ func DecodeInputSingleMedia(r *Reader) (*InputSingleMedia, error) {
 		if _ehdrEntities != nil {
 			return nil, _ehdrEntities
 		}
+		if _errEntities := checkVectorConstructor(_vhdrEntities); _errEntities != nil {
+			return nil, _errEntities
+		}
 		_cntEntities, _ecntEntities := r.ReadUint32()
 		if _ecntEntities != nil {
 			return nil, _ecntEntities
@@ -4415,9 +4575,12 @@ func DecodeInputSingleMedia(r *Reader) (*InputSingleMedia, error) {
 			if _errEntities != nil {
 				return nil, _errEntities
 			}
-			v.Entities[_iEntities] = _objEntities.(MessageEntityClass)
+			_cEntities, _okEntities := _objEntities.(MessageEntityClass)
+			if !_okEntities {
+				return nil, fmt.Errorf("decode: field entities: unexpected type %T", _objEntities)
+			}
+			v.Entities[_iEntities] = _cEntities
 		}
-		_ = _vhdrEntities
 	}
 	return v, nil
 }
@@ -5480,48 +5643,71 @@ func (v *SecureValue) Encode(b *bytes.Buffer) error {
 // DecodeSecureValue deserializes a SecureValue from a reader using the TL binary protocol.
 func DecodeSecureValue(r *Reader) (*SecureValue, error) {
 	v := &SecureValue{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objType, _errType := ReadTLObject(r)
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	if v.Flags.Has(0) {
 		_objData, _errData := ReadTLObject(r)
 		if _errData != nil {
 			return nil, _errData
 		}
-		v.Data = _objData.(*SecureData)
+		_cData, _okData := _objData.(*SecureData)
+		if !_okData {
+			return nil, fmt.Errorf("decode: field data: unexpected type %T", _objData)
+		}
+		v.Data = _cData
 	}
 	if v.Flags.Has(1) {
 		_objFrontSide, _errFrontSide := ReadTLObject(r)
 		if _errFrontSide != nil {
 			return nil, _errFrontSide
 		}
-		v.FrontSide = _objFrontSide.(SecureFileClass)
+		_cFrontSide, _okFrontSide := _objFrontSide.(SecureFileClass)
+		if !_okFrontSide {
+			return nil, fmt.Errorf("decode: field front_side: unexpected type %T", _objFrontSide)
+		}
+		v.FrontSide = _cFrontSide
 	}
 	if v.Flags.Has(2) {
 		_objReverseSide, _errReverseSide := ReadTLObject(r)
 		if _errReverseSide != nil {
 			return nil, _errReverseSide
 		}
-		v.ReverseSide = _objReverseSide.(SecureFileClass)
+		_cReverseSide, _okReverseSide := _objReverseSide.(SecureFileClass)
+		if !_okReverseSide {
+			return nil, fmt.Errorf("decode: field reverse_side: unexpected type %T", _objReverseSide)
+		}
+		v.ReverseSide = _cReverseSide
 	}
 	if v.Flags.Has(3) {
 		_objSelfie, _errSelfie := ReadTLObject(r)
 		if _errSelfie != nil {
 			return nil, _errSelfie
 		}
-		v.Selfie = _objSelfie.(SecureFileClass)
+		_cSelfie, _okSelfie := _objSelfie.(SecureFileClass)
+		if !_okSelfie {
+			return nil, fmt.Errorf("decode: field selfie: unexpected type %T", _objSelfie)
+		}
+		v.Selfie = _cSelfie
 	}
 	if v.Flags.Has(6) {
 		_vhdrTranslation, _ehdrTranslation := r.ReadUint32()
 		if _ehdrTranslation != nil {
 			return nil, _ehdrTranslation
+		}
+		if _errTranslation := checkVectorConstructor(_vhdrTranslation); _errTranslation != nil {
+			return nil, _errTranslation
 		}
 		_cntTranslation, _ecntTranslation := r.ReadUint32()
 		if _ecntTranslation != nil {
@@ -5536,14 +5722,20 @@ func DecodeSecureValue(r *Reader) (*SecureValue, error) {
 			if _errTranslation != nil {
 				return nil, _errTranslation
 			}
-			v.Translation[_iTranslation] = _objTranslation.(SecureFileClass)
+			_cTranslation, _okTranslation := _objTranslation.(SecureFileClass)
+			if !_okTranslation {
+				return nil, fmt.Errorf("decode: field translation: unexpected type %T", _objTranslation)
+			}
+			v.Translation[_iTranslation] = _cTranslation
 		}
-		_ = _vhdrTranslation
 	}
 	if v.Flags.Has(4) {
 		_vhdrFiles, _ehdrFiles := r.ReadUint32()
 		if _ehdrFiles != nil {
 			return nil, _ehdrFiles
+		}
+		if _errFiles := checkVectorConstructor(_vhdrFiles); _errFiles != nil {
+			return nil, _errFiles
 		}
 		_cntFiles, _ecntFiles := r.ReadUint32()
 		if _ecntFiles != nil {
@@ -5558,16 +5750,23 @@ func DecodeSecureValue(r *Reader) (*SecureValue, error) {
 			if _errFiles != nil {
 				return nil, _errFiles
 			}
-			v.Files[_iFiles] = _objFiles.(SecureFileClass)
+			_cFiles, _okFiles := _objFiles.(SecureFileClass)
+			if !_okFiles {
+				return nil, fmt.Errorf("decode: field files: unexpected type %T", _objFiles)
+			}
+			v.Files[_iFiles] = _cFiles
 		}
-		_ = _vhdrFiles
 	}
 	if v.Flags.Has(5) {
 		_objPlainData, _errPlainData := ReadTLObject(r)
 		if _errPlainData != nil {
 			return nil, _errPlainData
 		}
-		v.PlainData = _objPlainData.(SecurePlainDataClass)
+		_cPlainData, _okPlainData := _objPlainData.(SecurePlainDataClass)
+		if !_okPlainData {
+			return nil, fmt.Errorf("decode: field plain_data: unexpected type %T", _objPlainData)
+		}
+		v.PlainData = _cPlainData
 	}
 	_rHash, _eHash := r.ReadBytes()
 	if _eHash != nil {
@@ -5672,48 +5871,71 @@ func (v *InputSecureValue) Encode(b *bytes.Buffer) error {
 // DecodeInputSecureValue deserializes a InputSecureValue from a reader using the TL binary protocol.
 func DecodeInputSecureValue(r *Reader) (*InputSecureValue, error) {
 	v := &InputSecureValue{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objType, _errType := ReadTLObject(r)
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	if v.Flags.Has(0) {
 		_objData, _errData := ReadTLObject(r)
 		if _errData != nil {
 			return nil, _errData
 		}
-		v.Data = _objData.(*SecureData)
+		_cData, _okData := _objData.(*SecureData)
+		if !_okData {
+			return nil, fmt.Errorf("decode: field data: unexpected type %T", _objData)
+		}
+		v.Data = _cData
 	}
 	if v.Flags.Has(1) {
 		_objFrontSide, _errFrontSide := ReadTLObject(r)
 		if _errFrontSide != nil {
 			return nil, _errFrontSide
 		}
-		v.FrontSide = _objFrontSide.(InputSecureFileClass)
+		_cFrontSide, _okFrontSide := _objFrontSide.(InputSecureFileClass)
+		if !_okFrontSide {
+			return nil, fmt.Errorf("decode: field front_side: unexpected type %T", _objFrontSide)
+		}
+		v.FrontSide = _cFrontSide
 	}
 	if v.Flags.Has(2) {
 		_objReverseSide, _errReverseSide := ReadTLObject(r)
 		if _errReverseSide != nil {
 			return nil, _errReverseSide
 		}
-		v.ReverseSide = _objReverseSide.(InputSecureFileClass)
+		_cReverseSide, _okReverseSide := _objReverseSide.(InputSecureFileClass)
+		if !_okReverseSide {
+			return nil, fmt.Errorf("decode: field reverse_side: unexpected type %T", _objReverseSide)
+		}
+		v.ReverseSide = _cReverseSide
 	}
 	if v.Flags.Has(3) {
 		_objSelfie, _errSelfie := ReadTLObject(r)
 		if _errSelfie != nil {
 			return nil, _errSelfie
 		}
-		v.Selfie = _objSelfie.(InputSecureFileClass)
+		_cSelfie, _okSelfie := _objSelfie.(InputSecureFileClass)
+		if !_okSelfie {
+			return nil, fmt.Errorf("decode: field selfie: unexpected type %T", _objSelfie)
+		}
+		v.Selfie = _cSelfie
 	}
 	if v.Flags.Has(6) {
 		_vhdrTranslation, _ehdrTranslation := r.ReadUint32()
 		if _ehdrTranslation != nil {
 			return nil, _ehdrTranslation
+		}
+		if _errTranslation := checkVectorConstructor(_vhdrTranslation); _errTranslation != nil {
+			return nil, _errTranslation
 		}
 		_cntTranslation, _ecntTranslation := r.ReadUint32()
 		if _ecntTranslation != nil {
@@ -5728,14 +5950,20 @@ func DecodeInputSecureValue(r *Reader) (*InputSecureValue, error) {
 			if _errTranslation != nil {
 				return nil, _errTranslation
 			}
-			v.Translation[_iTranslation] = _objTranslation.(InputSecureFileClass)
+			_cTranslation, _okTranslation := _objTranslation.(InputSecureFileClass)
+			if !_okTranslation {
+				return nil, fmt.Errorf("decode: field translation: unexpected type %T", _objTranslation)
+			}
+			v.Translation[_iTranslation] = _cTranslation
 		}
-		_ = _vhdrTranslation
 	}
 	if v.Flags.Has(4) {
 		_vhdrFiles, _ehdrFiles := r.ReadUint32()
 		if _ehdrFiles != nil {
 			return nil, _ehdrFiles
+		}
+		if _errFiles := checkVectorConstructor(_vhdrFiles); _errFiles != nil {
+			return nil, _errFiles
 		}
 		_cntFiles, _ecntFiles := r.ReadUint32()
 		if _ecntFiles != nil {
@@ -5750,16 +5978,23 @@ func DecodeInputSecureValue(r *Reader) (*InputSecureValue, error) {
 			if _errFiles != nil {
 				return nil, _errFiles
 			}
-			v.Files[_iFiles] = _objFiles.(InputSecureFileClass)
+			_cFiles, _okFiles := _objFiles.(InputSecureFileClass)
+			if !_okFiles {
+				return nil, fmt.Errorf("decode: field files: unexpected type %T", _objFiles)
+			}
+			v.Files[_iFiles] = _cFiles
 		}
-		_ = _vhdrFiles
 	}
 	if v.Flags.Has(5) {
 		_objPlainData, _errPlainData := ReadTLObject(r)
 		if _errPlainData != nil {
 			return nil, _errPlainData
 		}
-		v.PlainData = _objPlainData.(SecurePlainDataClass)
+		_cPlainData, _okPlainData := _objPlainData.(SecurePlainDataClass)
+		if !_okPlainData {
+			return nil, fmt.Errorf("decode: field plain_data: unexpected type %T", _objPlainData)
+		}
+		v.PlainData = _cPlainData
 	}
 	return v, nil
 }
@@ -5801,7 +6036,11 @@ func DecodeSecureValueHash(r *Reader) (*SecureValueHash, error) {
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rHash, _eHash := r.ReadBytes()
 	if _eHash != nil {
 		return nil, _eHash
@@ -5910,7 +6149,11 @@ func DecodeSecureValueErrorData(r *Reader) (*SecureValueErrorData, error) {
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rDataHash, _eDataHash := r.ReadBytes()
 	if _eDataHash != nil {
 		return nil, _eDataHash
@@ -5965,7 +6208,11 @@ func DecodeSecureValueErrorFrontSide(r *Reader) (*SecureValueErrorFrontSide, err
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rFileHash, _eFileHash := r.ReadBytes()
 	if _eFileHash != nil {
 		return nil, _eFileHash
@@ -6015,7 +6262,11 @@ func DecodeSecureValueErrorReverseSide(r *Reader) (*SecureValueErrorReverseSide,
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rFileHash, _eFileHash := r.ReadBytes()
 	if _eFileHash != nil {
 		return nil, _eFileHash
@@ -6065,7 +6316,11 @@ func DecodeSecureValueErrorSelfie(r *Reader) (*SecureValueErrorSelfie, error) {
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rFileHash, _eFileHash := r.ReadBytes()
 	if _eFileHash != nil {
 		return nil, _eFileHash
@@ -6115,7 +6370,11 @@ func DecodeSecureValueErrorFile(r *Reader) (*SecureValueErrorFile, error) {
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rFileHash, _eFileHash := r.ReadBytes()
 	if _eFileHash != nil {
 		return nil, _eFileHash
@@ -6165,7 +6424,11 @@ func DecodeSecureValueErrorFiles(r *Reader) (*SecureValueErrorFiles, error) {
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_vvFileHash, _veFileHash := r.ReadVectorBytes()
 	if _veFileHash != nil {
 		return nil, _veFileHash
@@ -6215,7 +6478,11 @@ func DecodeSecureValueError(r *Reader) (*SecureValueError, error) {
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rHash, _eHash := r.ReadBytes()
 	if _eHash != nil {
 		return nil, _eHash
@@ -6265,7 +6532,11 @@ func DecodeSecureValueErrorTranslationFile(r *Reader) (*SecureValueErrorTranslat
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rFileHash, _eFileHash := r.ReadBytes()
 	if _eFileHash != nil {
 		return nil, _eFileHash
@@ -6315,7 +6586,11 @@ func DecodeSecureValueErrorTranslationFiles(r *Reader) (*SecureValueErrorTransla
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_vvFileHash, _veFileHash := r.ReadVectorBytes()
 	if _veFileHash != nil {
 		return nil, _veFileHash
@@ -6368,7 +6643,11 @@ func DecodeSecureSecretSettings(r *Reader) (*SecureSecretSettings, error) {
 	if _errSecureAlgo != nil {
 		return nil, _errSecureAlgo
 	}
-	v.SecureAlgo = _objSecureAlgo.(SecurePasswordKdfAlgoClass)
+	_cSecureAlgo, _okSecureAlgo := _objSecureAlgo.(SecurePasswordKdfAlgoClass)
+	if !_okSecureAlgo {
+		return nil, fmt.Errorf("decode: field secure_algo: unexpected type %T", _objSecureAlgo)
+	}
+	v.SecureAlgo = _cSecureAlgo
 	_rSecureSecret, _eSecureSecret := r.ReadBytes()
 	if _eSecureSecret != nil {
 		return nil, _eSecureSecret
@@ -6449,11 +6728,11 @@ func (v *SecureRequiredType) Encode(b *bytes.Buffer) error {
 // DecodeSecureRequiredType deserializes a SecureRequiredType from a reader using the TL binary protocol.
 func DecodeSecureRequiredType(r *Reader) (*SecureRequiredType, error) {
 	v := &SecureRequiredType{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.NativeNames = v.Flags.Has(0)
 	v.SelfieRequired = v.Flags.Has(1)
 	v.TranslationRequired = v.Flags.Has(2)
@@ -6461,7 +6740,11 @@ func DecodeSecureRequiredType(r *Reader) (*SecureRequiredType, error) {
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SecureValueTypeClass)
+	_cType, _okType := _objType.(SecureValueTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	return v, nil
 }
 
@@ -6501,6 +6784,9 @@ func DecodeSecureRequiredTypeOneOf(r *Reader) (*SecureRequiredTypeOneOf, error) 
 	if _ehdrTypes != nil {
 		return nil, _ehdrTypes
 	}
+	if _errTypes := checkVectorConstructor(_vhdrTypes); _errTypes != nil {
+		return nil, _errTypes
+	}
 	_cntTypes, _ecntTypes := r.ReadUint32()
 	if _ecntTypes != nil {
 		return nil, _ecntTypes
@@ -6514,9 +6800,12 @@ func DecodeSecureRequiredTypeOneOf(r *Reader) (*SecureRequiredTypeOneOf, error) 
 		if _errTypes != nil {
 			return nil, _errTypes
 		}
-		v.Types[_iTypes] = _objTypes.(SecureRequiredTypeClass)
+		_cTypes, _okTypes := _objTypes.(SecureRequiredTypeClass)
+		if !_okTypes {
+			return nil, fmt.Errorf("decode: field types: unexpected type %T", _objTypes)
+		}
+		v.Types[_iTypes] = _cTypes
 	}
-	_ = _vhdrTypes
 	return v, nil
 }
 
@@ -6576,7 +6865,11 @@ func DecodeInputAppEvent(r *Reader) (*InputAppEvent, error) {
 	if _errData != nil {
 		return nil, _errData
 	}
-	v.Data = _objData.(JSONValueClass)
+	_cData, _okData := _objData.(JSONValueClass)
+	if !_okData {
+		return nil, fmt.Errorf("decode: field data: unexpected type %T", _objData)
+	}
+	v.Data = _cData
 	return v, nil
 }
 
@@ -6622,7 +6915,11 @@ func DecodeJSONObjectValue(r *Reader) (*JSONObjectValue, error) {
 	if _errValue != nil {
 		return nil, _errValue
 	}
-	v.Value = _objValue.(JSONValueClass)
+	_cValue, _okValue := _objValue.(JSONValueClass)
+	if !_okValue {
+		return nil, fmt.Errorf("decode: field value: unexpected type %T", _objValue)
+	}
+	v.Value = _cValue
 	return v, nil
 }
 
@@ -6843,6 +7140,9 @@ func DecodeJSONArray(r *Reader) (*JSONArray, error) {
 	if _ehdrValue != nil {
 		return nil, _ehdrValue
 	}
+	if _errValue := checkVectorConstructor(_vhdrValue); _errValue != nil {
+		return nil, _errValue
+	}
 	_cntValue, _ecntValue := r.ReadUint32()
 	if _ecntValue != nil {
 		return nil, _ecntValue
@@ -6856,9 +7156,12 @@ func DecodeJSONArray(r *Reader) (*JSONArray, error) {
 		if _errValue != nil {
 			return nil, _errValue
 		}
-		v.Value[_iValue] = _objValue.(JSONValueClass)
+		_cValue, _okValue := _objValue.(JSONValueClass)
+		if !_okValue {
+			return nil, fmt.Errorf("decode: field value: unexpected type %T", _objValue)
+		}
+		v.Value[_iValue] = _cValue
 	}
-	_ = _vhdrValue
 	return v, nil
 }
 
@@ -6898,6 +7201,9 @@ func DecodeJSONObject(r *Reader) (*JSONObject, error) {
 	if _ehdrValue != nil {
 		return nil, _ehdrValue
 	}
+	if _errValue := checkVectorConstructor(_vhdrValue); _errValue != nil {
+		return nil, _errValue
+	}
 	_cntValue, _ecntValue := r.ReadUint32()
 	if _ecntValue != nil {
 		return nil, _ecntValue
@@ -6911,9 +7217,12 @@ func DecodeJSONObject(r *Reader) (*JSONObject, error) {
 		if _errValue != nil {
 			return nil, _errValue
 		}
-		v.Value[_iValue] = _objValue.(*JSONObjectValue)
+		_cValue, _okValue := _objValue.(*JSONObjectValue)
+		if !_okValue {
+			return nil, fmt.Errorf("decode: field value: unexpected type %T", _objValue)
+		}
+		v.Value[_iValue] = _cValue
 	}
-	_ = _vhdrValue
 	return v, nil
 }
 
@@ -7055,11 +7364,11 @@ func (v *CodeSettings) GetAppSandbox() (value bool, ok bool) {
 // DecodeCodeSettings deserializes a CodeSettings from a reader using the TL binary protocol.
 func DecodeCodeSettings(r *Reader) (*CodeSettings, error) {
 	v := &CodeSettings{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.AllowFlashcall = v.Flags.Has(0)
 	v.CurrentNumber = v.Flags.Has(1)
 	v.AllowAppHash = v.Flags.Has(4)
@@ -7330,11 +7639,11 @@ func (v *Theme) Encode(b *bytes.Buffer) error {
 // DecodeTheme deserializes a Theme from a reader using the TL binary protocol.
 func DecodeTheme(r *Reader) (*Theme, error) {
 	v := &Theme{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Creator = v.Flags.Has(0)
 	v.Default = v.Flags.Has(1)
 	v.ForChat = v.Flags.Has(5)
@@ -7363,12 +7672,19 @@ func DecodeTheme(r *Reader) (*Theme, error) {
 		if _errDocument != nil {
 			return nil, _errDocument
 		}
-		v.Document = _objDocument.(DocumentClass)
+		_cDocument, _okDocument := _objDocument.(DocumentClass)
+		if !_okDocument {
+			return nil, fmt.Errorf("decode: field document: unexpected type %T", _objDocument)
+		}
+		v.Document = _cDocument
 	}
 	if v.Flags.Has(3) {
 		_vhdrSettings, _ehdrSettings := r.ReadUint32()
 		if _ehdrSettings != nil {
 			return nil, _ehdrSettings
+		}
+		if _errSettings := checkVectorConstructor(_vhdrSettings); _errSettings != nil {
+			return nil, _errSettings
 		}
 		_cntSettings, _ecntSettings := r.ReadUint32()
 		if _ecntSettings != nil {
@@ -7383,9 +7699,12 @@ func DecodeTheme(r *Reader) (*Theme, error) {
 			if _errSettings != nil {
 				return nil, _errSettings
 			}
-			v.Settings[_iSettings] = _objSettings.(*ThemeSettings)
+			_cSettings, _okSettings := _objSettings.(*ThemeSettings)
+			if !_okSettings {
+				return nil, fmt.Errorf("decode: field settings: unexpected type %T", _objSettings)
+			}
+			v.Settings[_iSettings] = _cSettings
 		}
-		_ = _vhdrSettings
 	}
 	if v.Flags.Has(6) {
 		_rEmoticon, _eEmoticon := r.ReadString()
@@ -7659,17 +7978,21 @@ func (v *InputThemeSettings) Encode(b *bytes.Buffer) error {
 // DecodeInputThemeSettings deserializes a InputThemeSettings from a reader using the TL binary protocol.
 func DecodeInputThemeSettings(r *Reader) (*InputThemeSettings, error) {
 	v := &InputThemeSettings{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.MessageColorsAnimated = v.Flags.Has(2)
 	_objBaseTheme, _errBaseTheme := ReadTLObject(r)
 	if _errBaseTheme != nil {
 		return nil, _errBaseTheme
 	}
-	v.BaseTheme = _objBaseTheme.(BaseThemeClass)
+	_cBaseTheme, _okBaseTheme := _objBaseTheme.(BaseThemeClass)
+	if !_okBaseTheme {
+		return nil, fmt.Errorf("decode: field base_theme: unexpected type %T", _objBaseTheme)
+	}
+	v.BaseTheme = _cBaseTheme
 	_rAccentColor, _eAccentColor := r.ReadInt32()
 	if _eAccentColor != nil {
 		return nil, _eAccentColor
@@ -7694,14 +8017,22 @@ func DecodeInputThemeSettings(r *Reader) (*InputThemeSettings, error) {
 		if _errWallpaper != nil {
 			return nil, _errWallpaper
 		}
-		v.Wallpaper = _objWallpaper.(InputWallPaperClass)
+		_cWallpaper, _okWallpaper := _objWallpaper.(InputWallPaperClass)
+		if !_okWallpaper {
+			return nil, fmt.Errorf("decode: field wallpaper: unexpected type %T", _objWallpaper)
+		}
+		v.Wallpaper = _cWallpaper
 	}
 	if v.Flags.Has(1) {
 		_objWallpaperSettings, _errWallpaperSettings := ReadTLObject(r)
 		if _errWallpaperSettings != nil {
 			return nil, _errWallpaperSettings
 		}
-		v.WallpaperSettings = _objWallpaperSettings.(*WallPaperSettings)
+		_cWallpaperSettings, _okWallpaperSettings := _objWallpaperSettings.(*WallPaperSettings)
+		if !_okWallpaperSettings {
+			return nil, fmt.Errorf("decode: field wallpaper_settings: unexpected type %T", _objWallpaperSettings)
+		}
+		v.WallpaperSettings = _cWallpaperSettings
 	}
 	return v, nil
 }
@@ -7771,17 +8102,21 @@ func (v *ThemeSettings) Encode(b *bytes.Buffer) error {
 // DecodeThemeSettings deserializes a ThemeSettings from a reader using the TL binary protocol.
 func DecodeThemeSettings(r *Reader) (*ThemeSettings, error) {
 	v := &ThemeSettings{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.MessageColorsAnimated = v.Flags.Has(2)
 	_objBaseTheme, _errBaseTheme := ReadTLObject(r)
 	if _errBaseTheme != nil {
 		return nil, _errBaseTheme
 	}
-	v.BaseTheme = _objBaseTheme.(BaseThemeClass)
+	_cBaseTheme, _okBaseTheme := _objBaseTheme.(BaseThemeClass)
+	if !_okBaseTheme {
+		return nil, fmt.Errorf("decode: field base_theme: unexpected type %T", _objBaseTheme)
+	}
+	v.BaseTheme = _cBaseTheme
 	_rAccentColor, _eAccentColor := r.ReadInt32()
 	if _eAccentColor != nil {
 		return nil, _eAccentColor
@@ -7806,7 +8141,11 @@ func DecodeThemeSettings(r *Reader) (*ThemeSettings, error) {
 		if _errWallpaper != nil {
 			return nil, _errWallpaper
 		}
-		v.Wallpaper = _objWallpaper.(WallPaperClass)
+		_cWallpaper, _okWallpaper := _objWallpaper.(WallPaperClass)
+		if !_okWallpaper {
+			return nil, fmt.Errorf("decode: field wallpaper: unexpected type %T", _objWallpaper)
+		}
+		v.Wallpaper = _cWallpaper
 	}
 	return v, nil
 }
@@ -8089,16 +8428,20 @@ func (v *StatsGraph) Encode(b *bytes.Buffer) error {
 // DecodeStatsGraph deserializes a StatsGraph from a reader using the TL binary protocol.
 func DecodeStatsGraph(r *Reader) (*StatsGraph, error) {
 	v := &StatsGraph{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objJSON, _errJSON := ReadTLObject(r)
 	if _errJSON != nil {
 		return nil, _errJSON
 	}
-	v.JSON = _objJSON.(*DataJSON)
+	_cJSON, _okJSON := _objJSON.(*DataJSON)
+	if !_okJSON {
+		return nil, fmt.Errorf("decode: field json: unexpected type %T", _objJSON)
+	}
+	v.JSON = _cJSON
 	if v.Flags.Has(0) {
 		_rZoomToken, _eZoomToken := r.ReadString()
 		if _eZoomToken != nil {
@@ -8751,6 +9094,9 @@ func DecodeTextWithEntities(r *Reader) (*TextWithEntities, error) {
 	if _ehdrEntities != nil {
 		return nil, _ehdrEntities
 	}
+	if _errEntities := checkVectorConstructor(_vhdrEntities); _errEntities != nil {
+		return nil, _errEntities
+	}
 	_cntEntities, _ecntEntities := r.ReadUint32()
 	if _ecntEntities != nil {
 		return nil, _ecntEntities
@@ -8764,9 +9110,12 @@ func DecodeTextWithEntities(r *Reader) (*TextWithEntities, error) {
 		if _errEntities != nil {
 			return nil, _errEntities
 		}
-		v.Entities[_iEntities] = _objEntities.(MessageEntityClass)
+		_cEntities, _okEntities := _objEntities.(MessageEntityClass)
+		if !_okEntities {
+			return nil, fmt.Errorf("decode: field entities: unexpected type %T", _objEntities)
+		}
+		v.Entities[_iEntities] = _cEntities
 	}
-	_ = _vhdrEntities
 	return v, nil
 }
 
@@ -8793,6 +9142,9 @@ const InputReplyToStoryTypeID = 0x5881323a
 // InputReplyToMonoForumTypeID is the constructor ID for TL type inputReplyToMonoForum.
 const InputReplyToMonoForumTypeID = 0x69d66c45
 
+// InputReplyToEphemeralMessageTypeID is the constructor ID for TL type inputReplyToEphemeralMessage.
+const InputReplyToEphemeralMessageTypeID = 0x4119b95e
+
 // isInputReplyTo marks InputReplyToMessage as implementing the InputReplyToClass interface.
 func (*InputReplyToMessage) isInputReplyTo() {}
 
@@ -8801,6 +9153,9 @@ func (*InputReplyToStory) isInputReplyTo() {}
 
 // isInputReplyTo marks InputReplyToMonoForum as implementing the InputReplyToClass interface.
 func (*InputReplyToMonoForum) isInputReplyTo() {}
+
+// isInputReplyTo marks InputReplyToEphemeralMessage as implementing the InputReplyToClass interface.
+func (*InputReplyToEphemeralMessage) isInputReplyTo() {}
 
 // InputReplyToMessage represents the TL constructor inputReplyToMessage (0x3bd4b7c2).
 //
@@ -8891,11 +9246,11 @@ func (v *InputReplyToMessage) Encode(b *bytes.Buffer) error {
 // DecodeInputReplyToMessage deserializes a InputReplyToMessage from a reader using the TL binary protocol.
 func DecodeInputReplyToMessage(r *Reader) (*InputReplyToMessage, error) {
 	v := &InputReplyToMessage{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rReplyToMsgID, _eReplyToMsgID := r.ReadInt32()
 	if _eReplyToMsgID != nil {
 		return nil, _eReplyToMsgID
@@ -8913,7 +9268,11 @@ func DecodeInputReplyToMessage(r *Reader) (*InputReplyToMessage, error) {
 		if _errReplyToPeerID != nil {
 			return nil, _errReplyToPeerID
 		}
-		v.ReplyToPeerID = _objReplyToPeerID.(InputPeerClass)
+		_cReplyToPeerID, _okReplyToPeerID := _objReplyToPeerID.(InputPeerClass)
+		if !_okReplyToPeerID {
+			return nil, fmt.Errorf("decode: field reply_to_peer_id: unexpected type %T", _objReplyToPeerID)
+		}
+		v.ReplyToPeerID = _cReplyToPeerID
 	}
 	if v.Flags.Has(2) {
 		_rQuoteText, _eQuoteText := r.ReadString()
@@ -8926,6 +9285,9 @@ func DecodeInputReplyToMessage(r *Reader) (*InputReplyToMessage, error) {
 		_vhdrQuoteEntities, _ehdrQuoteEntities := r.ReadUint32()
 		if _ehdrQuoteEntities != nil {
 			return nil, _ehdrQuoteEntities
+		}
+		if _errQuoteEntities := checkVectorConstructor(_vhdrQuoteEntities); _errQuoteEntities != nil {
+			return nil, _errQuoteEntities
 		}
 		_cntQuoteEntities, _ecntQuoteEntities := r.ReadUint32()
 		if _ecntQuoteEntities != nil {
@@ -8940,9 +9302,12 @@ func DecodeInputReplyToMessage(r *Reader) (*InputReplyToMessage, error) {
 			if _errQuoteEntities != nil {
 				return nil, _errQuoteEntities
 			}
-			v.QuoteEntities[_iQuoteEntities] = _objQuoteEntities.(MessageEntityClass)
+			_cQuoteEntities, _okQuoteEntities := _objQuoteEntities.(MessageEntityClass)
+			if !_okQuoteEntities {
+				return nil, fmt.Errorf("decode: field quote_entities: unexpected type %T", _objQuoteEntities)
+			}
+			v.QuoteEntities[_iQuoteEntities] = _cQuoteEntities
 		}
-		_ = _vhdrQuoteEntities
 	}
 	if v.Flags.Has(4) {
 		_rQuoteOffset, _eQuoteOffset := r.ReadInt32()
@@ -8956,7 +9321,11 @@ func DecodeInputReplyToMessage(r *Reader) (*InputReplyToMessage, error) {
 		if _errMonoforumPeerID != nil {
 			return nil, _errMonoforumPeerID
 		}
-		v.MonoforumPeerID = _objMonoforumPeerID.(InputPeerClass)
+		_cMonoforumPeerID, _okMonoforumPeerID := _objMonoforumPeerID.(InputPeerClass)
+		if !_okMonoforumPeerID {
+			return nil, fmt.Errorf("decode: field monoforum_peer_id: unexpected type %T", _objMonoforumPeerID)
+		}
+		v.MonoforumPeerID = _cMonoforumPeerID
 	}
 	if v.Flags.Has(6) {
 		_rTodoItemID, _eTodoItemID := r.ReadInt32()
@@ -9009,7 +9378,11 @@ func DecodeInputReplyToStory(r *Reader) (*InputReplyToStory, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(InputPeerClass)
+	_cPeer, _okPeer := _objPeer.(InputPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rStoryID, _eStoryID := r.ReadInt32()
 	if _eStoryID != nil {
 		return nil, _eStoryID
@@ -9050,13 +9423,53 @@ func DecodeInputReplyToMonoForum(r *Reader) (*InputReplyToMonoForum, error) {
 	if _errMonoforumPeerID != nil {
 		return nil, _errMonoforumPeerID
 	}
-	v.MonoforumPeerID = _objMonoforumPeerID.(InputPeerClass)
+	_cMonoforumPeerID, _okMonoforumPeerID := _objMonoforumPeerID.(InputPeerClass)
+	if !_okMonoforumPeerID {
+		return nil, fmt.Errorf("decode: field monoforum_peer_id: unexpected type %T", _objMonoforumPeerID)
+	}
+	v.MonoforumPeerID = _cMonoforumPeerID
 	return v, nil
 }
 
 func init() {
 	Registry[InputReplyToMonoForumTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeInputReplyToMonoForum(r)
+	}
+}
+
+// InputReplyToEphemeralMessage represents the TL constructor inputReplyToEphemeralMessage (0x4119b95e).
+//
+// See https://core.telegram.org/constructor/inputReplyToEphemeralMessage for reference.
+type InputReplyToEphemeralMessage struct {
+	ID int32 `json:"id,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x4119b95e.
+func (v *InputReplyToEphemeralMessage) ConstructorID() uint32 {
+	return InputReplyToEphemeralMessageTypeID
+}
+
+// Encode serializes InputReplyToEphemeralMessage to a bytes.Buffer using the TL binary protocol.
+func (v *InputReplyToEphemeralMessage) Encode(b *bytes.Buffer) error {
+	WriteInt(b, InputReplyToEphemeralMessageTypeID)
+	WriteInt(b, uint32(v.ID))
+	return nil
+}
+
+// DecodeInputReplyToEphemeralMessage deserializes a InputReplyToEphemeralMessage from a reader using the TL binary protocol.
+func DecodeInputReplyToEphemeralMessage(r *Reader) (*InputReplyToEphemeralMessage, error) {
+	v := &InputReplyToEphemeralMessage{}
+	_rID, _eID := r.ReadInt32()
+	if _eID != nil {
+		return nil, _eID
+	}
+	v.ID = _rID
+	return v, nil
+}
+
+func init() {
+	Registry[InputReplyToEphemeralMessageTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeInputReplyToEphemeralMessage(r)
 	}
 }
 
@@ -9107,11 +9520,11 @@ func (v *MediaAreaCoordinates) Encode(b *bytes.Buffer) error {
 // DecodeMediaAreaCoordinates deserializes a MediaAreaCoordinates from a reader using the TL binary protocol.
 func DecodeMediaAreaCoordinates(r *Reader) (*MediaAreaCoordinates, error) {
 	v := &MediaAreaCoordinates{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rX, _eX := r.ReadFloat64()
 	if _eX != nil {
 		return nil, _eX
@@ -9253,12 +9666,20 @@ func DecodeMediaAreaVenue(r *Reader) (*MediaAreaVenue, error) {
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_objGeo, _errGeo := ReadTLObject(r)
 	if _errGeo != nil {
 		return nil, _errGeo
 	}
-	v.Geo = _objGeo.(GeoPointClass)
+	_cGeo, _okGeo := _objGeo.(GeoPointClass)
+	if !_okGeo {
+		return nil, fmt.Errorf("decode: field geo: unexpected type %T", _objGeo)
+	}
+	v.Geo = _cGeo
 	_rTitle, _eTitle := r.ReadString()
 	if _eTitle != nil {
 		return nil, _eTitle
@@ -9323,7 +9744,11 @@ func DecodeInputMediaAreaVenue(r *Reader) (*InputMediaAreaVenue, error) {
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_rQueryID, _eQueryID := r.ReadInt64()
 	if _eQueryID != nil {
 		return nil, _eQueryID
@@ -9381,27 +9806,39 @@ func (v *MediaAreaGeoPoint) Encode(b *bytes.Buffer) error {
 // DecodeMediaAreaGeoPoint deserializes a MediaAreaGeoPoint from a reader using the TL binary protocol.
 func DecodeMediaAreaGeoPoint(r *Reader) (*MediaAreaGeoPoint, error) {
 	v := &MediaAreaGeoPoint{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objCoordinates, _errCoordinates := ReadTLObject(r)
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_objGeo, _errGeo := ReadTLObject(r)
 	if _errGeo != nil {
 		return nil, _errGeo
 	}
-	v.Geo = _objGeo.(GeoPointClass)
+	_cGeo, _okGeo := _objGeo.(GeoPointClass)
+	if !_okGeo {
+		return nil, fmt.Errorf("decode: field geo: unexpected type %T", _objGeo)
+	}
+	v.Geo = _cGeo
 	if v.Flags.Has(0) {
 		_objAddress, _errAddress := ReadTLObject(r)
 		if _errAddress != nil {
 			return nil, _errAddress
 		}
-		v.Address = _objAddress.(*GeoPointAddress)
+		_cAddress, _okAddress := _objAddress.(*GeoPointAddress)
+		if !_okAddress {
+			return nil, fmt.Errorf("decode: field address: unexpected type %T", _objAddress)
+		}
+		v.Address = _cAddress
 	}
 	return v, nil
 }
@@ -9451,23 +9888,31 @@ func (v *MediaAreaSuggestedReaction) Encode(b *bytes.Buffer) error {
 // DecodeMediaAreaSuggestedReaction deserializes a MediaAreaSuggestedReaction from a reader using the TL binary protocol.
 func DecodeMediaAreaSuggestedReaction(r *Reader) (*MediaAreaSuggestedReaction, error) {
 	v := &MediaAreaSuggestedReaction{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Dark = v.Flags.Has(0)
 	v.Flipped = v.Flags.Has(1)
 	_objCoordinates, _errCoordinates := ReadTLObject(r)
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_objReaction, _errReaction := ReadTLObject(r)
 	if _errReaction != nil {
 		return nil, _errReaction
 	}
-	v.Reaction = _objReaction.(ReactionClass)
+	_cReaction, _okReaction := _objReaction.(ReactionClass)
+	if !_okReaction {
+		return nil, fmt.Errorf("decode: field reaction: unexpected type %T", _objReaction)
+	}
+	v.Reaction = _cReaction
 	return v, nil
 }
 
@@ -9507,7 +9952,11 @@ func DecodeMediaAreaChannelPost(r *Reader) (*MediaAreaChannelPost, error) {
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_rChannelID, _eChannelID := r.ReadInt64()
 	if _eChannelID != nil {
 		return nil, _eChannelID
@@ -9557,12 +10006,20 @@ func DecodeInputMediaAreaChannelPost(r *Reader) (*InputMediaAreaChannelPost, err
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_objChannel, _errChannel := ReadTLObject(r)
 	if _errChannel != nil {
 		return nil, _errChannel
 	}
-	v.Channel = _objChannel.(InputChannelClass)
+	_cChannel, _okChannel := _objChannel.(InputChannelClass)
+	if !_okChannel {
+		return nil, fmt.Errorf("decode: field channel: unexpected type %T", _objChannel)
+	}
+	v.Channel = _cChannel
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -9605,7 +10062,11 @@ func DecodeMediaAreaURL(r *Reader) (*MediaAreaURL, error) {
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_rURL, _eURL := r.ReadString()
 	if _eURL != nil {
 		return nil, _eURL
@@ -9652,7 +10113,11 @@ func DecodeMediaAreaWeather(r *Reader) (*MediaAreaWeather, error) {
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_rEmoji, _eEmoji := r.ReadString()
 	if _eEmoji != nil {
 		return nil, _eEmoji
@@ -9705,7 +10170,11 @@ func DecodeMediaAreaStarGift(r *Reader) (*MediaAreaStarGift, error) {
 	if _errCoordinates != nil {
 		return nil, _errCoordinates
 	}
-	v.Coordinates = _objCoordinates.(*MediaAreaCoordinates)
+	_cCoordinates, _okCoordinates := _objCoordinates.(*MediaAreaCoordinates)
+	if !_okCoordinates {
+		return nil, fmt.Errorf("decode: field coordinates: unexpected type %T", _objCoordinates)
+	}
+	v.Coordinates = _cCoordinates
 	_rSlug, _eSlug := r.ReadString()
 	if _eSlug != nil {
 		return nil, _eSlug
@@ -9900,7 +10369,11 @@ func DecodePublicForwardMessage(r *Reader) (*PublicForwardMessage, error) {
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	return v, nil
 }
 
@@ -9938,12 +10411,20 @@ func DecodePublicForwardStory(r *Reader) (*PublicForwardStory, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objStory, _errStory := ReadTLObject(r)
 	if _errStory != nil {
 		return nil, _errStory
 	}
-	v.Story = _objStory.(StoryItemClass)
+	_cStory, _okStory := _objStory.(StoryItemClass)
+	if !_okStory {
+		return nil, fmt.Errorf("decode: field story: unexpected type %T", _objStory)
+	}
+	v.Story = _cStory
 	return v, nil
 }
 
@@ -10191,11 +10672,11 @@ func (v *AvailableEffect) Encode(b *bytes.Buffer) error {
 // DecodeAvailableEffect deserializes a AvailableEffect from a reader using the TL binary protocol.
 func DecodeAvailableEffect(r *Reader) (*AvailableEffect, error) {
 	v := &AvailableEffect{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.PremiumRequired = v.Flags.Has(2)
 	_rID, _eID := r.ReadInt64()
 	if _eID != nil {
@@ -10285,11 +10766,11 @@ func (v *FactCheck) Encode(b *bytes.Buffer) error {
 // DecodeFactCheck deserializes a FactCheck from a reader using the TL binary protocol.
 func DecodeFactCheck(r *Reader) (*FactCheck, error) {
 	v := &FactCheck{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.NeedCheck = v.Flags.Has(0)
 	if v.Flags.Has(1) {
 		_rCountry, _eCountry := r.ReadString()
@@ -10303,7 +10784,11 @@ func DecodeFactCheck(r *Reader) (*FactCheck, error) {
 		if _errText != nil {
 			return nil, _errText
 		}
-		v.Text = _objText.(*TextWithEntities)
+		_cText, _okText := _objText.(*TextWithEntities)
+		if !_okText {
+			return nil, fmt.Errorf("decode: field text: unexpected type %T", _objText)
+		}
+		v.Text = _cText
 	}
 	_rHash, _eHash := r.ReadInt64()
 	if _eHash != nil {
@@ -10382,6 +10867,9 @@ func DecodeReportResultChooseOption(r *Reader) (*ReportResultChooseOption, error
 	if _ehdrOptions != nil {
 		return nil, _ehdrOptions
 	}
+	if _errOptions := checkVectorConstructor(_vhdrOptions); _errOptions != nil {
+		return nil, _errOptions
+	}
 	_cntOptions, _ecntOptions := r.ReadUint32()
 	if _ecntOptions != nil {
 		return nil, _ecntOptions
@@ -10395,9 +10883,12 @@ func DecodeReportResultChooseOption(r *Reader) (*ReportResultChooseOption, error
 		if _errOptions != nil {
 			return nil, _errOptions
 		}
-		v.Options[_iOptions] = _objOptions.(*MessageReportOption)
+		_cOptions, _okOptions := _objOptions.(*MessageReportOption)
+		if !_okOptions {
+			return nil, fmt.Errorf("decode: field options: unexpected type %T", _objOptions)
+		}
+		v.Options[_iOptions] = _cOptions
 	}
-	_ = _vhdrOptions
 	return v, nil
 }
 
@@ -10440,11 +10931,11 @@ func (v *ReportResultAddComment) Encode(b *bytes.Buffer) error {
 // DecodeReportResultAddComment deserializes a ReportResultAddComment from a reader using the TL binary protocol.
 func DecodeReportResultAddComment(r *Reader) (*ReportResultAddComment, error) {
 	v := &ReportResultAddComment{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Optional = v.Flags.Has(0)
 	_rOption, _eOption := r.ReadBytes()
 	if _eOption != nil {
@@ -10539,11 +11030,11 @@ func (v *DisallowedGiftsSettings) Encode(b *bytes.Buffer) error {
 // DecodeDisallowedGiftsSettings deserializes a DisallowedGiftsSettings from a reader using the TL binary protocol.
 func DecodeDisallowedGiftsSettings(r *Reader) (*DisallowedGiftsSettings, error) {
 	v := &DisallowedGiftsSettings{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.DisallowUnlimitedStargifts = v.Flags.Has(0)
 	v.DisallowLimitedStargifts = v.Flags.Has(1)
 	v.DisallowUniqueStargifts = v.Flags.Has(2)
@@ -10598,12 +11089,20 @@ func DecodePendingSuggestion(r *Reader) (*PendingSuggestion, error) {
 	if _errTitle != nil {
 		return nil, _errTitle
 	}
-	v.Title = _objTitle.(*TextWithEntities)
+	_cTitle, _okTitle := _objTitle.(*TextWithEntities)
+	if !_okTitle {
+		return nil, fmt.Errorf("decode: field title: unexpected type %T", _objTitle)
+	}
+	v.Title = _cTitle
 	_objDescription, _errDescription := ReadTLObject(r)
 	if _errDescription != nil {
 		return nil, _errDescription
 	}
-	v.Description = _objDescription.(*TextWithEntities)
+	_cDescription, _okDescription := _objDescription.(*TextWithEntities)
+	if !_okDescription {
+		return nil, fmt.Errorf("decode: field description: unexpected type %T", _objDescription)
+	}
+	v.Description = _cDescription
 	_rURL, _eURL := r.ReadString()
 	if _eURL != nil {
 		return nil, _eURL
@@ -10670,11 +11169,11 @@ func (v *SuggestedPost) Encode(b *bytes.Buffer) error {
 // DecodeSuggestedPost deserializes a SuggestedPost from a reader using the TL binary protocol.
 func DecodeSuggestedPost(r *Reader) (*SuggestedPost, error) {
 	v := &SuggestedPost{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Accepted = v.Flags.Has(1)
 	v.Rejected = v.Flags.Has(2)
 	if v.Flags.Has(3) {
@@ -10682,7 +11181,11 @@ func DecodeSuggestedPost(r *Reader) (*SuggestedPost, error) {
 		if _errPrice != nil {
 			return nil, _errPrice
 		}
-		v.Price = _objPrice.(StarsAmountClass)
+		_cPrice, _okPrice := _objPrice.(StarsAmountClass)
+		if !_okPrice {
+			return nil, fmt.Errorf("decode: field price: unexpected type %T", _objPrice)
+		}
+		v.Price = _cPrice
 	}
 	if v.Flags.Has(0) {
 		_rScheduleDate, _eScheduleDate := r.ReadInt32()
@@ -10747,11 +11250,11 @@ func (v *SearchPostsFlood) Encode(b *bytes.Buffer) error {
 // DecodeSearchPostsFlood deserializes a SearchPostsFlood from a reader using the TL binary protocol.
 func DecodeSearchPostsFlood(r *Reader) (*SearchPostsFlood, error) {
 	v := &SearchPostsFlood{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.QueryIsFree = v.Flags.Has(0)
 	_rTotalDaily, _eTotalDaily := r.ReadInt32()
 	if _eTotalDaily != nil {
@@ -11168,11 +11671,11 @@ func (v *WebDomainException) Encode(b *bytes.Buffer) error {
 // DecodeWebDomainException deserializes a WebDomainException from a reader using the TL binary protocol.
 func DecodeWebDomainException(r *Reader) (*WebDomainException, error) {
 	v := &WebDomainException{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rDomain, _eDomain := r.ReadString()
 	if _eDomain != nil {
 		return nil, _eDomain
@@ -11257,7 +11760,11 @@ func DecodeInputRichFilePhoto(r *Reader) (*InputRichFilePhoto, error) {
 	if _errPhoto != nil {
 		return nil, _errPhoto
 	}
-	v.Photo = _objPhoto.(InputPhotoClass)
+	_cPhoto, _okPhoto := _objPhoto.(InputPhotoClass)
+	if !_okPhoto {
+		return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+	}
+	v.Photo = _cPhoto
 	return v, nil
 }
 
@@ -11300,13 +11807,474 @@ func DecodeInputRichFileDocument(r *Reader) (*InputRichFileDocument, error) {
 	if _errDocument != nil {
 		return nil, _errDocument
 	}
-	v.Document = _objDocument.(InputDocumentClass)
+	_cDocument, _okDocument := _objDocument.(InputDocumentClass)
+	if !_okDocument {
+		return nil, fmt.Errorf("decode: field document: unexpected type %T", _objDocument)
+	}
+	v.Document = _cDocument
 	return v, nil
 }
 
 func init() {
 	Registry[InputRichFileDocumentTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeInputRichFileDocument(r)
+	}
+}
+
+// ButtonTypeClass is the interface for TL type ButtonType.
+// Implementations must satisfy TLObject and are used to represent
+// any constructor of the ButtonType TL type.
+type ButtonTypeClass interface {
+	TLObject
+	isButtonType()
+}
+
+// ButtonTypeDefaultTypeID is the constructor ID for TL type buttonTypeDefault.
+const ButtonTypeDefaultTypeID = 0xc9dd90e9
+
+// ButtonTypeRequestPhoneTypeID is the constructor ID for TL type buttonTypeRequestPhone.
+const ButtonTypeRequestPhoneTypeID = 0xdf3d36f9
+
+// ButtonTypeRequestGeoLocationTypeID is the constructor ID for TL type buttonTypeRequestGeoLocation.
+const ButtonTypeRequestGeoLocationTypeID = 0x9beee140
+
+// ButtonTypeRequestPollTypeID is the constructor ID for TL type buttonTypeRequestPoll.
+const ButtonTypeRequestPollTypeID = 0xaacfff84
+
+// ButtonTypeRequestPeerTypeID is the constructor ID for TL type buttonTypeRequestPeer.
+const ButtonTypeRequestPeerTypeID = 0x4f58a237
+
+// InputButtonTypeRequestPeerTypeID is the constructor ID for TL type inputButtonTypeRequestPeer.
+const InputButtonTypeRequestPeerTypeID = 0x3fe268fe
+
+// ButtonTypeSimpleWebViewTypeID is the constructor ID for TL type buttonTypeSimpleWebView.
+const ButtonTypeSimpleWebViewTypeID = 0xc01a597a
+
+// isButtonType marks ButtonTypeDefault as implementing the ButtonTypeClass interface.
+func (*ButtonTypeDefault) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestPhone as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestPhone) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestGeoLocation as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestGeoLocation) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestPoll as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestPoll) isButtonType() {}
+
+// isButtonType marks ButtonTypeRequestPeer as implementing the ButtonTypeClass interface.
+func (*ButtonTypeRequestPeer) isButtonType() {}
+
+// isButtonType marks InputButtonTypeRequestPeer as implementing the ButtonTypeClass interface.
+func (*InputButtonTypeRequestPeer) isButtonType() {}
+
+// isButtonType marks ButtonTypeSimpleWebView as implementing the ButtonTypeClass interface.
+func (*ButtonTypeSimpleWebView) isButtonType() {}
+
+// ButtonTypeDefault represents the TL constructor buttonTypeDefault (0xc9dd90e9).
+//
+// See https://core.telegram.org/constructor/buttonTypeDefault for reference.
+type ButtonTypeDefault struct {
+}
+
+// ConstructorID returns the TL constructor identifier 0xc9dd90e9.
+func (v *ButtonTypeDefault) ConstructorID() uint32 {
+	return ButtonTypeDefaultTypeID
+}
+
+// Encode serializes ButtonTypeDefault to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeDefault) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeDefaultTypeID)
+	return nil
+}
+
+// DecodeButtonTypeDefault deserializes a ButtonTypeDefault from a reader using the TL binary protocol.
+func DecodeButtonTypeDefault(r *Reader) (*ButtonTypeDefault, error) {
+	v := &ButtonTypeDefault{}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeDefaultTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeDefault(r)
+	}
+}
+
+// ButtonTypeRequestPhone represents the TL constructor buttonTypeRequestPhone (0xdf3d36f9).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestPhone for reference.
+type ButtonTypeRequestPhone struct {
+}
+
+// ConstructorID returns the TL constructor identifier 0xdf3d36f9.
+func (v *ButtonTypeRequestPhone) ConstructorID() uint32 {
+	return ButtonTypeRequestPhoneTypeID
+}
+
+// Encode serializes ButtonTypeRequestPhone to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestPhone) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestPhoneTypeID)
+	return nil
+}
+
+// DecodeButtonTypeRequestPhone deserializes a ButtonTypeRequestPhone from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestPhone(r *Reader) (*ButtonTypeRequestPhone, error) {
+	v := &ButtonTypeRequestPhone{}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestPhoneTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestPhone(r)
+	}
+}
+
+// ButtonTypeRequestGeoLocation represents the TL constructor buttonTypeRequestGeoLocation (0x9beee140).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestGeoLocation for reference.
+type ButtonTypeRequestGeoLocation struct {
+}
+
+// ConstructorID returns the TL constructor identifier 0x9beee140.
+func (v *ButtonTypeRequestGeoLocation) ConstructorID() uint32 {
+	return ButtonTypeRequestGeoLocationTypeID
+}
+
+// Encode serializes ButtonTypeRequestGeoLocation to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestGeoLocation) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestGeoLocationTypeID)
+	return nil
+}
+
+// DecodeButtonTypeRequestGeoLocation deserializes a ButtonTypeRequestGeoLocation from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestGeoLocation(r *Reader) (*ButtonTypeRequestGeoLocation, error) {
+	v := &ButtonTypeRequestGeoLocation{}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestGeoLocationTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestGeoLocation(r)
+	}
+}
+
+// ButtonTypeRequestPoll represents the TL constructor buttonTypeRequestPoll (0xaacfff84).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestPoll for reference.
+type ButtonTypeRequestPoll struct {
+	Flags Fields `json:"-"`
+	Quiz  bool   `json:"quiz,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *ButtonTypeRequestPoll) SetFlags() {
+	if v.Quiz {
+		v.Flags.Set(0)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0xaacfff84.
+func (v *ButtonTypeRequestPoll) ConstructorID() uint32 {
+	return ButtonTypeRequestPollTypeID
+}
+
+// Encode serializes ButtonTypeRequestPoll to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestPoll) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestPollTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	if v.Flags.Has(0) {
+		WriteBool(b, v.Quiz)
+	}
+	return nil
+}
+
+// SetQuiz sets value of Quiz conditional field.
+func (v *ButtonTypeRequestPoll) SetQuiz(value bool) {
+	v.Flags.Set(0)
+	v.Quiz = value
+}
+
+// GetQuiz returns value of Quiz conditional field and a boolean
+// that is true if the field was set.
+func (v *ButtonTypeRequestPoll) GetQuiz() (value bool, ok bool) {
+	if v == nil {
+		return
+	}
+	if !v.Flags.Has(0) {
+		return value, false
+	}
+	return v.Quiz, true
+}
+
+// DecodeButtonTypeRequestPoll deserializes a ButtonTypeRequestPoll from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestPoll(r *Reader) (*ButtonTypeRequestPoll, error) {
+	v := &ButtonTypeRequestPoll{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	if v.Flags.Has(0) {
+		_rQuiz, _eQuiz := r.ReadBool()
+		if _eQuiz != nil {
+			return nil, _eQuiz
+		}
+		v.Quiz = _rQuiz
+	}
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestPollTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestPoll(r)
+	}
+}
+
+// ButtonTypeRequestPeer represents the TL constructor buttonTypeRequestPeer (0x4f58a237).
+//
+// See https://core.telegram.org/constructor/buttonTypeRequestPeer for reference.
+type ButtonTypeRequestPeer struct {
+	Flags       Fields               `json:"-"`
+	ButtonID    int32                `json:"button_id,omitempty"`
+	PeerType    RequestPeerTypeClass `json:"peer_type,omitempty"`
+	MaxQuantity int32                `json:"max_quantity,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *ButtonTypeRequestPeer) SetFlags() {
+}
+
+// ConstructorID returns the TL constructor identifier 0x4f58a237.
+func (v *ButtonTypeRequestPeer) ConstructorID() uint32 {
+	return ButtonTypeRequestPeerTypeID
+}
+
+// Encode serializes ButtonTypeRequestPeer to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeRequestPeer) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeRequestPeerTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteInt(b, uint32(v.ButtonID))
+	EncodeTLObject(b, v.PeerType)
+	WriteInt(b, uint32(v.MaxQuantity))
+	return nil
+}
+
+// DecodeButtonTypeRequestPeer deserializes a ButtonTypeRequestPeer from a reader using the TL binary protocol.
+func DecodeButtonTypeRequestPeer(r *Reader) (*ButtonTypeRequestPeer, error) {
+	v := &ButtonTypeRequestPeer{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	_rButtonID, _eButtonID := r.ReadInt32()
+	if _eButtonID != nil {
+		return nil, _eButtonID
+	}
+	v.ButtonID = _rButtonID
+	_objPeerType, _errPeerType := ReadTLObject(r)
+	if _errPeerType != nil {
+		return nil, _errPeerType
+	}
+	_cPeerType, _okPeerType := _objPeerType.(RequestPeerTypeClass)
+	if !_okPeerType {
+		return nil, fmt.Errorf("decode: field peer_type: unexpected type %T", _objPeerType)
+	}
+	v.PeerType = _cPeerType
+	_rMaxQuantity, _eMaxQuantity := r.ReadInt32()
+	if _eMaxQuantity != nil {
+		return nil, _eMaxQuantity
+	}
+	v.MaxQuantity = _rMaxQuantity
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeRequestPeerTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeRequestPeer(r)
+	}
+}
+
+// InputButtonTypeRequestPeer represents the TL constructor inputButtonTypeRequestPeer (0x3fe268fe).
+//
+// See https://core.telegram.org/constructor/inputButtonTypeRequestPeer for reference.
+type InputButtonTypeRequestPeer struct {
+	Flags             Fields               `json:"-"`
+	NameRequested     bool                 `json:"name_requested,omitempty"`
+	UsernameRequested bool                 `json:"username_requested,omitempty"`
+	PhotoRequested    bool                 `json:"photo_requested,omitempty"`
+	ButtonID          int32                `json:"button_id,omitempty"`
+	PeerType          RequestPeerTypeClass `json:"peer_type,omitempty"`
+	MaxQuantity       int32                `json:"max_quantity,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *InputButtonTypeRequestPeer) SetFlags() {
+	if v.NameRequested {
+		v.Flags.Set(0)
+	}
+	if v.UsernameRequested {
+		v.Flags.Set(1)
+	}
+	if v.PhotoRequested {
+		v.Flags.Set(2)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x3fe268fe.
+func (v *InputButtonTypeRequestPeer) ConstructorID() uint32 {
+	return InputButtonTypeRequestPeerTypeID
+}
+
+// Encode serializes InputButtonTypeRequestPeer to a bytes.Buffer using the TL binary protocol.
+func (v *InputButtonTypeRequestPeer) Encode(b *bytes.Buffer) error {
+	WriteInt(b, InputButtonTypeRequestPeerTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	WriteInt(b, uint32(v.ButtonID))
+	EncodeTLObject(b, v.PeerType)
+	WriteInt(b, uint32(v.MaxQuantity))
+	return nil
+}
+
+// DecodeInputButtonTypeRequestPeer deserializes a InputButtonTypeRequestPeer from a reader using the TL binary protocol.
+func DecodeInputButtonTypeRequestPeer(r *Reader) (*InputButtonTypeRequestPeer, error) {
+	v := &InputButtonTypeRequestPeer{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.NameRequested = v.Flags.Has(0)
+	v.UsernameRequested = v.Flags.Has(1)
+	v.PhotoRequested = v.Flags.Has(2)
+	_rButtonID, _eButtonID := r.ReadInt32()
+	if _eButtonID != nil {
+		return nil, _eButtonID
+	}
+	v.ButtonID = _rButtonID
+	_objPeerType, _errPeerType := ReadTLObject(r)
+	if _errPeerType != nil {
+		return nil, _errPeerType
+	}
+	_cPeerType, _okPeerType := _objPeerType.(RequestPeerTypeClass)
+	if !_okPeerType {
+		return nil, fmt.Errorf("decode: field peer_type: unexpected type %T", _objPeerType)
+	}
+	v.PeerType = _cPeerType
+	_rMaxQuantity, _eMaxQuantity := r.ReadInt32()
+	if _eMaxQuantity != nil {
+		return nil, _eMaxQuantity
+	}
+	v.MaxQuantity = _rMaxQuantity
+	return v, nil
+}
+
+func init() {
+	Registry[InputButtonTypeRequestPeerTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeInputButtonTypeRequestPeer(r)
+	}
+}
+
+// ButtonTypeSimpleWebView represents the TL constructor buttonTypeSimpleWebView (0xc01a597a).
+//
+// See https://core.telegram.org/constructor/buttonTypeSimpleWebView for reference.
+type ButtonTypeSimpleWebView struct {
+	URL string `json:"url,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0xc01a597a.
+func (v *ButtonTypeSimpleWebView) ConstructorID() uint32 {
+	return ButtonTypeSimpleWebViewTypeID
+}
+
+// Encode serializes ButtonTypeSimpleWebView to a bytes.Buffer using the TL binary protocol.
+func (v *ButtonTypeSimpleWebView) Encode(b *bytes.Buffer) error {
+	WriteInt(b, ButtonTypeSimpleWebViewTypeID)
+	WriteString(b, v.URL)
+	return nil
+}
+
+// DecodeButtonTypeSimpleWebView deserializes a ButtonTypeSimpleWebView from a reader using the TL binary protocol.
+func DecodeButtonTypeSimpleWebView(r *Reader) (*ButtonTypeSimpleWebView, error) {
+	v := &ButtonTypeSimpleWebView{}
+	_rURL, _eURL := r.ReadString()
+	if _eURL != nil {
+		return nil, _eURL
+	}
+	v.URL = _rURL
+	return v, nil
+}
+
+func init() {
+	Registry[ButtonTypeSimpleWebViewTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeButtonTypeSimpleWebView(r)
+	}
+}
+
+// RichButtonStyleTypeID is the constructor ID for TL type richButtonStyle.
+const RichButtonStyleTypeID = 0x03c610bd
+
+// RichButtonStyle represents the TL constructor richButtonStyle (0x03c610bd).
+//
+// See https://core.telegram.org/constructor/richButtonStyle for reference.
+type RichButtonStyle struct {
+	Flags     Fields `json:"-"`
+	BgPrimary bool   `json:"bg_primary,omitempty"`
+	BgDanger  bool   `json:"bg_danger,omitempty"`
+	BgSuccess bool   `json:"bg_success,omitempty"`
+	Link      bool   `json:"link,omitempty"`
+}
+
+// SetFlags computes flags from non-zero optional fields.
+func (v *RichButtonStyle) SetFlags() {
+	if v.BgPrimary {
+		v.Flags.Set(0)
+	}
+	if v.BgDanger {
+		v.Flags.Set(1)
+	}
+	if v.BgSuccess {
+		v.Flags.Set(2)
+	}
+	if v.Link {
+		v.Flags.Set(3)
+	}
+}
+
+// ConstructorID returns the TL constructor identifier 0x03c610bd.
+func (v *RichButtonStyle) ConstructorID() uint32 {
+	return RichButtonStyleTypeID
+}
+
+// Encode serializes RichButtonStyle to a bytes.Buffer using the TL binary protocol.
+func (v *RichButtonStyle) Encode(b *bytes.Buffer) error {
+	WriteInt(b, RichButtonStyleTypeID)
+	v.SetFlags()
+	WriteInt(b, uint32(v.Flags))
+	return nil
+}
+
+// DecodeRichButtonStyle deserializes a RichButtonStyle from a reader using the TL binary protocol.
+func DecodeRichButtonStyle(r *Reader) (*RichButtonStyle, error) {
+	v := &RichButtonStyle{}
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
+	}
+	v.Flags = Fields(_rFlags)
+	v.BgPrimary = v.Flags.Has(0)
+	v.BgDanger = v.Flags.Has(1)
+	v.BgSuccess = v.Flags.Has(2)
+	v.Link = v.Flags.Has(3)
+	return v, nil
+}
+
+func init() {
+	Registry[RichButtonStyleTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeRichButtonStyle(r)
 	}
 }
 
@@ -12643,7 +13611,11 @@ func DecodeRPCResult(r *Reader) (*RPCResult, error) {
 	if _errResult != nil {
 		return nil, _errResult
 	}
-	v.Result = _objResult.(TLObject)
+	_cResult, _okResult := _objResult.(TLObject)
+	if !_okResult {
+		return nil, fmt.Errorf("decode: field result: unexpected type %T", _objResult)
+	}
+	v.Result = _cResult
 	return v, nil
 }
 
@@ -13366,7 +14338,10 @@ func DecodeAccessPointRule(r *Reader) (*AccessPointRule, error) {
 		if _errIps != nil {
 			return nil, _errIps
 		}
-		_itemIps := _objIps.(IpPortClass)
+		_itemIps, _okIps := _objIps.(IpPortClass)
+		if !_okIps {
+			return nil, fmt.Errorf("decode: field Ips: unexpected type %T", _objIps)
+		}
 		v.Ips[_iIps] = _itemIps
 	}
 	return v, nil

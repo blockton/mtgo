@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mtgo-labs/mtgo/telegram/params"
 	"github.com/mtgo-labs/mtgo/telegram/parser"
@@ -10,28 +11,60 @@ import (
 	"github.com/mtgo-labs/mtgo/tg"
 )
 
-// toParserMode converts a params.ParseMode string to a parser.ParseMode.
-// Returns false for default/disabled/empty modes.
-func toParserMode(mode params.ParseMode) (parser.ParseMode, bool) {
-	switch mode {
-	case params.ParseModeHTML:
-		return parser.ParseModeHTML, true
-	case params.ParseModeMarkdown:
-		return parser.ParseModeMarkdown, true
+// toParserMode normalizes and converts a params.ParseMode string to a parser.ParseMode.
+// Returns false for default/disabled/empty modes. Returns an error for unknown
+// non-empty values (e.g. typos like "HTMl") to surface the mistake immediately.
+func toParserMode(mode params.ParseMode) (parser.ParseMode, bool, error) {
+	normalized := strings.ToLower(strings.TrimSpace(string(mode)))
+	switch normalized {
+	case "html":
+		return parser.ParseModeHTML, true, nil
+	case "markdown", "markdownv2":
+		return parser.ParseModeMarkdown, true, nil
+	case "", "default", "disabled":
+		return parser.ParseModeDefault, false, nil
 	default:
-		return parser.ParseModeDefault, false
+		return parser.ParseModeDefault, false, fmt.Errorf("unknown parse mode %q (valid: html, markdown, markdownv2, disabled)", mode)
 	}
+}
+
+// buildReplyTo constructs the reply-to parameter for message sending,
+// handling forum topic routing. Mirrors PyrogramMod's get_reply_head_fm:
+//   - Explicit ReplyTo takes precedence.
+//   - ReplyToMessageID only: simple reply to that message.
+//   - MessageThreadID only: send to topic (reply_to_msg_id = top_msg_id = thread).
+//   - Both set: reply to message inside topic (reply_to_msg_id = reply, top_msg_id = thread).
+func buildReplyTo(replyTo tg.InputReplyToClass, replyToMessageID, messageThreadID int32) tg.InputReplyToClass {
+	if replyTo != nil {
+		return replyTo
+	}
+	if replyToMessageID == 0 && messageThreadID == 0 {
+		return nil
+	}
+	msgID := replyToMessageID
+	if msgID == 0 {
+		msgID = messageThreadID
+	}
+	rt := &tg.InputReplyToMessage{ReplyToMsgID: msgID}
+	if messageThreadID != 0 {
+		rt.TopMsgID = messageThreadID
+	}
+	return rt
 }
 
 // parseText resolves the effective parse mode from opts → client default,
 // then parses formatted text into plain text + entities.
+// Returns an error if the parse mode is unknown.
 // If entities are already provided or parse mode is unset, returns text unchanged.
 func (c *Client) parseText(text string, optParseMode params.ParseMode) (string, []tg.MessageEntityClass, error) {
 	mode := optParseMode
 	if mode == "" || mode == params.ParseModeDefault {
 		mode = c.cfg.ParseMode
 	}
-	pm, ok := toParserMode(mode)
+	pm, ok, err := toParserMode(mode)
+	if err != nil {
+		return "", nil, err
+	}
 	if !ok {
 		return text, nil, nil
 	}
@@ -123,13 +156,9 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, opt
 		flags.Set(16)
 	}
 
-	var replyTo tg.InputReplyToClass
-	if opt.ReplyTo != nil {
+	replyTo := buildReplyTo(opt.ReplyTo, opt.ReplyToMessageID, opt.MessageThreadID)
+	if replyTo != nil {
 		flags.Set(0)
-		replyTo = opt.ReplyTo
-	} else if opt.ReplyToMessageID != 0 {
-		flags.Set(0)
-		replyTo = &tg.InputReplyToMessage{ReplyToMsgID: opt.ReplyToMessageID}
 	}
 	if opt.ReplyMarkup != nil {
 		flags.Set(2)
@@ -565,13 +594,9 @@ func (c *Client) sendMediaInternal(ctx context.Context, peer tg.InputPeerClass, 
 		flags.Set(16)
 	}
 
-	var replyTo tg.InputReplyToClass
-	if opt.ReplyTo != nil {
+	replyTo := buildReplyTo(opt.ReplyTo, opt.ReplyToMessageID, opt.MessageThreadID)
+	if replyTo != nil {
 		flags.Set(0)
-		replyTo = opt.ReplyTo
-	} else if opt.ReplyToMessageID != 0 {
-		flags.Set(0)
-		replyTo = &tg.InputReplyToMessage{ReplyToMsgID: opt.ReplyToMessageID}
 	}
 	if opt.ReplyMarkup != nil {
 		flags |= (1 << 2)

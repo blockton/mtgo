@@ -3,6 +3,7 @@ package telegram
 import (
 	"testing"
 
+	"github.com/mtgo-labs/mtgo/telegram/types"
 	"github.com/mtgo-labs/mtgo/tg"
 )
 
@@ -16,6 +17,8 @@ func TestWrapInitConnection(t *testing.T) {
 			SystemLangCode: "en",
 			LangPack:       "android",
 			LangCode:       "en",
+			ClientPlatform: types.ClientPlatformAndroid,
+			PackageID:      "org.telegram.messenger",
 		},
 	}
 	query := &tg.PingRequest{PingID: 42}
@@ -53,8 +56,51 @@ func TestWrapInitConnection(t *testing.T) {
 	if init.LangCode != cfg.Device.LangCode {
 		t.Errorf("LangCode = %q, want %q", init.LangCode, cfg.Device.LangCode)
 	}
+	params, ok := init.Params.(*tg.JSONObject)
+	if !ok || len(params.Value) != 1 {
+		t.Fatalf("Params = %#v, want one package_id entry", init.Params)
+	}
+	if params.Value[0].Key != "package_id" {
+		t.Errorf("Params key = %q, want %q", params.Value[0].Key, "package_id")
+	}
+	value, ok := params.Value[0].Value.(*tg.JSONString)
+	if !ok || value.Value != cfg.Device.PackageID {
+		t.Errorf("Params value = %#v, want %q", params.Value[0].Value, cfg.Device.PackageID)
+	}
 	if init.Query != query {
 		t.Errorf("Query = %p, want %p", init.Query, query)
+	}
+}
+
+func TestPrepareAPIQuery(t *testing.T) {
+	cfg := Config{APIID: 12345}
+	query := &tg.PingRequest{PingID: 42}
+
+	prepared, initializesAPI := prepareAPIQuery(cfg, false, query)
+	if !initializesAPI {
+		t.Fatal("first API query should initialize the connection")
+	}
+	wrapped, ok := prepared.(*tg.InvokeWithLayerRequest)
+	if !ok {
+		t.Fatalf("first API query = %T, want *tg.InvokeWithLayerRequest", prepared)
+	}
+	init, ok := wrapped.Query.(*tg.InitConnectionRequest)
+	if !ok || init.Query != query {
+		t.Fatalf("first API query payload = %T, want initConnection containing original query", wrapped.Query)
+	}
+
+	prepared, initializesAPI = prepareAPIQuery(cfg, true, query)
+	if initializesAPI {
+		t.Fatal("initialized connection should not be initialized again")
+	}
+	if prepared != query {
+		t.Fatalf("initialized query = %T, want original query", prepared)
+	}
+
+	explicit := &tg.InvokeWithLayerRequest{Layer: tg.Layer, Query: query}
+	prepared, initializesAPI = prepareAPIQuery(cfg, false, explicit)
+	if initializesAPI || prepared != explicit {
+		t.Fatal("explicit layer wrapper should pass through unchanged")
 	}
 }
 

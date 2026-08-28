@@ -1,11 +1,14 @@
 package telegram
 
 import (
+	"context"
+	"net"
 	"time"
 
 	"github.com/mtgo-labs/mtgo/internal/storage"
 	"github.com/mtgo-labs/mtgo/telegram/params"
 	"github.com/mtgo-labs/mtgo/telegram/types"
+	"github.com/mtgo-labs/mtgo/tg"
 )
 
 // Proxy holds connection details for routing Telegram traffic through an
@@ -36,6 +39,25 @@ type MTProxyConfig struct {
 	Addr string
 	// Secret is the hex-encoded MTProxy secret string.
 	Secret string
+}
+
+// HTTPTransportConfig enables MTProto's request/response HTTP transport.
+// It is intended for networks that block raw TCP and WebSocket connections.
+// MTProto payloads remain end-to-end encrypted; TLS can additionally protect
+// transport metadata.
+type HTTPTransportConfig struct {
+	// URLs optionally overrides the Telegram DC endpoints. Each value must be a
+	// complete http:// or https:// URL. When empty, DC /api URLs are generated.
+	URLs []string
+	// TLS uses HTTPS for generated DC URLs. It has no effect when URLs is set.
+	TLS bool
+	// MaxInFlight bounds concurrent HTTP requests per session. Defaults to 16.
+	MaxInFlight int
+	// MaxDelay, WaitAfter, and MaxWait configure encrypted http_wait polling.
+	// MaxWait defaults to 25 seconds; the other values default to zero.
+	MaxDelay  time.Duration
+	WaitAfter time.Duration
+	MaxWait   time.Duration
 }
 
 // LogConfig controls logging behaviour for the MTProto client. Use it to
@@ -74,17 +96,23 @@ type DeviceConfig struct {
 	TZOffset int
 	// ClientPlatform identifies the simulated platform.
 	ClientPlatform types.ClientPlatform
+	// PackageID is the Android package, Apple bundle, or desktop application
+	// identifier used by platform-integrated authorization challenges.
+	PackageID string
 }
+
+// TransportMode selects the MTProto TCP framing mode for direct TCP connections.
+type TransportMode int
 
 const (
 	// TransportModeAbridged selects the compact MTProto abridged TCP transport.
-	TransportModeAbridged = "Abridged"
+	TransportModeAbridged TransportMode = iota
 	// TransportModeIntermediate selects the fixed 4-byte length-prefix TCP transport.
-	TransportModeIntermediate = "Intermediate"
+	TransportModeIntermediate
 	// TransportModePaddedIntermediate selects intermediate framing with 0-15 bytes of transport padding.
-	TransportModePaddedIntermediate = "PaddedIntermediate"
+	TransportModePaddedIntermediate
 	// TransportModeFull selects full TCP framing with sequence numbers and CRC32.
-	TransportModeFull = "Full"
+	TransportModeFull
 
 	defaultDispatchQueueSize = 256
 )
@@ -124,12 +152,14 @@ type Config struct {
 	// PhoneNumber when authenticating as a bot.
 	BotToken string
 	// SessionString is a string-encoded session (Telethon, Pyrogram, GramJS,
-	// mtcute, or auto-detected format). The client decodes it internally
-	// during initialization; errors are returned from Connect/Start.
+	// mtcute, or other supported formats; auto-detected via
+	// session-converter). The client decodes it internally during
+	// initialization; errors are returned from Connect/Start.
 	//
-	//   session.StringSession("auto_detect")
-	//   session.TelethonSession("1abc...")
-	//   session.PyrogramSession("base64...")
+	// Set this field directly with the session string. Use the tgconv CLI
+	// or the session-converter Go package to convert between formats:
+	//
+	//   https://github.com/mtgo-labs/session-converter
 	//
 	SessionString string
 	// PhoneNumber is the phone number of the Telegram account to authorize,
@@ -156,6 +186,9 @@ type Config struct {
 	// the account has two-factor authentication enabled. If nil,
 	// TerminalPasswordFunc (stdin prompt) is used.
 	PasswordFunc PasswordFunc
+	// RecaptchaSolver automatically handles RECAPTCHA_CHECK challenges raised
+	// by auth.sendCode. If nil, the original Telegram RPC error is returned.
+	RecaptchaSolver RecaptchaSolver
 	// WorkDir is the filesystem directory where session files are stored.
 	// Defaults to the current working directory when empty.
 	WorkDir string
@@ -178,6 +211,9 @@ type Config struct {
 	//	    Secret: "dd05fb7acb549be047a7c585116581418",
 	//	}
 	MTProxy *MTProxyConfig
+	// HTTPTransport routes MTProto through Telegram's HTTP /api endpoint.
+	// It is mutually exclusive with WebSocket and MTProxy.
+	HTTPTransport *HTTPTransportConfig
 	// TestMode connects to Telegram's test datacenters instead of production.
 	// Only useful during library development or integration testing.
 	TestMode bool
@@ -188,10 +224,10 @@ type Config struct {
 	// Set to true when the client only needs to send requests, not listen for
 	// incoming events.
 	NoUpdates bool
-	// AutoConnect enables automatic connection on first RPC call or update
-	// handler registration, without requiring an explicit Connect() call.
-	// When true, the client lazily connects when needed and automatically
-	// reconnects on disconnection. Defaults to false.
+	// AutoConnect enables automatic connection on the first operation that
+	// requires an active connection, without requiring an explicit Connect call.
+	// Reconnection after a dropped connection is controlled separately by
+	// ReconnectEnabled. Defaults to false.
 	AutoConnect bool
 	// SkipUpdates discards all updates that arrived while the client was
 	// offline. Prevents a flood of stale messages on reconnection.
@@ -210,9 +246,12 @@ type Config struct {
 	// ReqTimeout is the default timeout applied to RPC requests when no deadline
 	// is set on the context. Defaults to 60 seconds. Enforced minimum of 1 second.
 	ReqTimeout time.Duration
+	// RetryInterval is the initial delay between RPC retry attempts. The delay
+	// doubles on each subsequent retry up to a cap. Defaults to 5 seconds.
+	RetryInterval time.Duration
 	// Retries is the number of retries for RPC calls on transient errors
 	// (timeouts, connection resets, 500s). Non-retryable errors (401, 400, 403)
-	// fail immediately regardless of this setting. Defaults to 1.
+	// fail immediately regardless of this setting. Defaults to 5.
 	// The send timeout per attempt is controlled by ReqTimeout.
 	Retries int
 	// MaxConcurrentTrans limits how many file transfers may run in parallel.
@@ -275,40 +314,53 @@ type Config struct {
 	// When set, its fields override the top-level AppVersion, DeviceModel,
 	// SystemVersion, LangCode, LangPack, SystemLangCode, TZOffset, and
 	// ClientPlatform fields for backwards compatibility.
+	//
+	// Migration: the deprecated top-level fields (AppVersion, DeviceModel,
+	// SystemVersion, LangCode, LangPack, SystemLangCode, TZOffset) are
+	// preserved for backwards compatibility and will be removed in v2.
+	// New code should use Device directly instead.
 	Device DeviceConfig
 	// AppVersion is the version string reported to Telegram. Used by
 	// Telegram's infrastructure for client identification.
-	// Deprecated: use Device.AppVersion instead.
+	//
+	// Deprecated: use Device.AppVersion instead. Will be removed in v2.
 	AppVersion string
 	// DeviceModel is the hardware model reported to Telegram (e.g.
 	// "Samsung Galaxy S24"). Affects session display in active sessions.
-	// Deprecated: use Device.DeviceModel instead.
+	//
+	// Deprecated: use Device.DeviceModel instead. Will be removed in v2.
 	DeviceModel string
 	// SystemVersion is the operating system version reported to Telegram
 	// (e.g. "Android 14").
-	// Deprecated: use Device.SystemVersion instead.
+	//
+	// Deprecated: use Device.SystemVersion instead. Will be removed in v2.
 	SystemVersion string
 	// LangCode is the two-letter ISO 639-1 language code for the client's
 	// UI language (e.g. "en", "ru").
-	// Deprecated: use Device.LangCode instead.
+	//
+	// Deprecated: use Device.LangCode instead. Will be removed in v2.
 	LangCode string
 	// LangPack names the translation pack to use (e.g. "tdesktop" for the
 	// desktop client pack). Affects server-side localisation of prompts.
-	// Deprecated: use Device.LangPack instead.
+	//
+	// Deprecated: use Device.LangPack instead. Will be removed in v2.
 	LangPack string
 	// SystemLangCode is the device-level language code reported to Telegram.
 	// Used for localisation of security notifications.
-	// Deprecated: use Device.SystemLangCode instead.
+	//
+	// Deprecated: use Device.SystemLangCode instead. Will be removed in v2.
 	SystemLangCode string
 	// TZOffset is the timezone offset in seconds from UTC. Telegram uses this
 	// to display timestamps in the correct local time.
-	// Deprecated: use Device.TZOffset instead.
+	//
+	// Deprecated: use Device.TZOffset instead. Will be removed in v2.
 	TZOffset int
 	// TransportMode selects the MTProto TCP framing mode for direct TCP
-	// connections. Valid values are Abridged, Intermediate,
-	// PaddedIntermediate, and Full. When empty, NewClient uses the default
-	// Abridged transport mode.
-	TransportMode string
+	// connections. When zero (TransportModeAbridged), NewClient uses the
+	// compact abridged transport. Other valid values are
+	// TransportModeIntermediate, TransportModePaddedIntermediate, and
+	// TransportModeFull.
+	TransportMode TransportMode
 	// SavePeers persists encountered peer identifiers to the session file so
 	// that they survive restarts without re-fetching.
 	SavePeers bool
@@ -332,6 +384,22 @@ type Config struct {
 	// WebSocketTLS enables TLS encryption on the WebSocket transport. Should
 	// be true in production to prevent MITM attacks on the WS connection.
 	WebSocketTLS bool
+	// WSDialer, when set, replaces the default WebSocket dialer used when
+	// WebSocket is true. Use this to inject a custom WebSocket implementation
+	// — most notably a browser WebSocket (via syscall/js) for GOOS=js GOARCH=wasm
+	// builds.
+	//
+	// The dialer must return a fully-framed net.Conn (obfuscated2 layer applied).
+	// Callers supplying a raw bytestream (e.g. a browser WebSocket stream) should
+	// wrap their factory with NewWSDialer, which applies the obfuscation layer
+	// internally so the caller never touches internal/transport:
+	//
+	//	cfg.WebSocket = true
+	//	cfg.WebSocketTLS = true
+	//	cfg.WSDialer = telegram.NewWSDialer(browserRawWSFactory)
+	//
+	// Has no effect unless WebSocket is true.
+	WSDialer func(ctx context.Context, addr string) (net.Conn, error)
 	// ServerAddr is an optional override for the DC address to connect to.
 	// When set, the client dials this address directly instead of resolving
 	// the DC address from the built-in datacenter map. Format: "host:port".
@@ -375,14 +443,15 @@ type Config struct {
 	// Shorter intervals detect failures faster but consume more bandwidth.
 	// Defaults to 60 seconds.
 	HealthPingInterval time.Duration
-	// HealthPongTimeout is the maximum time to wait for a pong response
-	// before treating the connection as dead and triggering a reconnect.
+	// HealthPongTimeout is the minimum time to wait for a pong response before
+	// treating the connection as dead. RTT variation may extend this timeout.
 	// Defaults to 30 seconds.
 	HealthPongTimeout time.Duration
 
 	// PFS enables Perfect Forward Secrecy mode where temporary auth keys
 	// are used for message encryption instead of the permanent key. Temp
-	// keys are generated via DH exchange and bound to the permanent key.
+	// keys are generated per connection via DH exchange and bound to the
+	// permanent key. Generation and binding fail closed when PFS is enabled.
 	// When false (default), the permanent auth key is used directly.
 	// Ported from td/td/telegram/net/Session.cpp:1488-1498 (auth_loop PFS).
 	PFS bool
@@ -391,45 +460,24 @@ type Config struct {
 	// on reconnect instead of dialing fresh. Defaults to 10 seconds.
 	// Ported from td/td/telegram/net/ConnectionCreator.cpp (READY_CONNECTIONS_TIMEOUT).
 	ConnPoolTTL time.Duration
+	// DCPoolSize bounds the number of persistent connections created for each
+	// non-primary DC. Values above 1 enable health-aware request scheduling;
+	// values above 16 are clamped. Defaults to 1 to avoid multiplying connection
+	// count in large multi-account deployments.
+	DCPoolSize int
+	// UploadPoolSize controls the number of parallel upload sessions created
+	// on the home DC for file uploads. Each session shares the main session's
+	// permanent auth key (no DH exchange) and runs its own TCP connection.
+	// Defaults to 4 for throughput; set to 1 to use the main session only.
+	UploadPoolSize int
 	// EndpointCoolDown is the time to wait before retrying a failed DC
 	// endpoint. Failed endpoints are skipped until the cool-down expires.
 	// Defaults to 16 seconds.
 	// Ported from td/td/telegram/net/ConnectionCreator.cpp (MAX_BACKOFF desktop).
 	EndpointCoolDown time.Duration
-
-	// UpdateQueueSize is the buffered channel capacity for incoming updates.
-	// Larger values absorb bursts but increase memory usage. Defaults to 1024.
-	UpdateQueueSize int
-	// DurableUpdateQueue persists undelivered updates across reconnects so
-	// that no update is lost during brief network outages. Defaults to true.
-	DurableUpdateQueue bool
-	// MaxUpdateHandlerRetry is the number of times the client will retry
-	// calling an update handler that returned an error. After exhausting
-	// retries the update is dropped. Defaults to 3.
-	MaxUpdateHandlerRetry int
-	// UpdateRecoveryEnabled restores updates that may have been lost during
-	// a reconnection by fetching missed events from the server. Defaults to true.
-	UpdateRecoveryEnabled bool
-
 	// ---- Production Hardening (003-production-hardening) ----
 	// All fields below are opt-in: zero-value = current behavior (Constitution
 	// Principle IV). Enable them for high-throughput production deployments.
-
-	// InboundQueueDepth enables the bounded inbound update dispatch queue.
-	// When > 0, received updates are dispatched concurrently by a worker pool
-	// instead of synchronously inline, with this many updates buffered at most.
-	// When 0 (default), dispatch stays synchronous (current behavior).
-	InboundQueueDepth int
-	// InboundQueueWorkers sets the number of concurrent dispatch workers. When
-	// 0 and InboundQueueDepth > 0, defaults to runtime.NumCPU(). Updates with
-	// the same routing key (chat/channel) are dispatched to the same worker to
-	// preserve ordering; updates across keys dispatch concurrently.
-	InboundQueueWorkers int
-	// InboundStallBudget is the maximum time the producer blocks when the
-	// inbound queue is full before applying the overflow policy (shed the
-	// lowest-priority update and trigger getDifference recovery). When 0 and
-	// InboundQueueDepth > 0, defaults to 500ms.
-	InboundStallBudget time.Duration
 
 	// MaxInFlightRPCs enables overload-controlled RPC admission. When > 0, RPCs
 	// are admitted through a semaphore: high-priority RPCs wait up to
@@ -441,17 +489,19 @@ type Config struct {
 	// overload. When 0 and MaxInFlightRPCs > 0, defaults to 5s.
 	AdmissionDeadline time.Duration
 
-	// OutboundBatchEnabled enables outbound container packing: multiple RPCs
-	// queued within a short window are coalesced into a single MTProto
-	// msg_container. When false (default), each RPC is sent as a separate
-	// encrypted message (current behavior).
+	// OutboundBatchEnabled enables outbound container packing for low-priority
+	// bulk RPCs queued within a short window. High-priority interactive RPCs
+	// always bypass the batcher. When false (default), each RPC is sent as a
+	// separate encrypted message.
 	OutboundBatchEnabled bool
 	// OutboundMaxContainerBytes caps the serialized size of a single container.
 	// When 0 and OutboundBatchEnabled is true, defaults to 1 MiB.
 	OutboundMaxContainerBytes int
-	// OutboundCoalesceWindow is the micro-window engaged only when N>1 RPCs
-	// are queued and a send is in flight. Lone/idle RPCs always flush
-	// immediately. When 0 and OutboundBatchEnabled is true, defaults to 1ms.
+	// OutboundCoalesceWindow is the max time low-priority RPCs wait for
+	// additional work before sending. When 0 and OutboundBatchEnabled is true,
+	// defaults to 10ms.
+	// Set to -1 to disable the coalesce window (items already queued are
+	// packed, but the batcher does not wait for more).
 	OutboundCoalesceWindow time.Duration
 
 	// RSAKeyRotationInterval enables the PublicRsaKeyWatchdog: a background
@@ -469,12 +519,31 @@ type Config struct {
 	// MTProxy connections are always obfuscated regardless of this flag.
 	AlwaysObfuscate bool
 
-	// MaxChannelDiffConcurrency limits how many concurrent
-	// updates.getChannelDifference requests may be in flight across all
-	// tracked channels. When 0 (default), there is no limit. A value of
-	// 3-5 protects accounts in many active channels from FLOOD_WAIT.
-	// Ported from TDLib MAX_CONCURRENT_GET_CHANNEL_DIFFERENCES.
-	MaxChannelDiffConcurrency int
+	// RetryRPCOnReconnect enables automatic retry of in-flight RPC calls
+	// when the transport disconnects. When enabled, Client.Invoke
+	// transparently waits for reconnection and re-sends the query on the
+	// new session instead of returning ErrSessionClosed to the caller.
+	//
+	// Callers see only a latency spike, not an error. The retry budget is
+	// bounded by MaxRPCReconnectRetries and the caller's context deadline.
+	//
+	// MTGO only replays methods classified as safe. Delivery-uncertain calls
+	// return RPCDeliveryError instead of being replayed; RPCReplaySafe can opt
+	// additional application-specific idempotent methods into replay.
+	RetryRPCOnReconnect bool
+
+	// MaxRPCReconnectRetries limits how many reconnect-retry cycles a single
+	// Invoke call tolerates before surfacing the error. Defaults to 3 when
+	// RetryRPCOnReconnect is enabled and this is 0. Set to -1 for unlimited
+	// retries (bounded only by the context deadline).
+	MaxRPCReconnectRetries int
+	// RPCReplaySafe optionally marks additional queries safe to replay after an
+	// uncertain disconnect. MTGO already recognizes read-only methods. Return
+	// true only when repeating the operation cannot duplicate side effects.
+	RPCReplaySafe func(tg.TLObject) bool
+	// Telemetry receives structured RPC and connection observations. Nil keeps
+	// the hot path free of telemetry work and dependencies.
+	Telemetry Telemetry
 }
 
 // DeviceTDesktopWindows returns a DeviceConfig that mimics Telegram Desktop
@@ -494,6 +563,7 @@ func DeviceTDesktopWindows() DeviceConfig {
 		LangCode:       "en",
 		SystemLangCode: "en-US",
 		ClientPlatform: types.ClientPlatformDesktop,
+		PackageID:      "org.telegram.desktop",
 	}
 }
 
@@ -510,7 +580,8 @@ func DeviceTDesktopWindows() DeviceConfig {
 var DefaultConfig = Config{
 	SleepThreshold:      10 * time.Second,
 	Timeout:             60 * time.Second,
-	ReqTimeout:          60 * time.Second,
+		ReqTimeout:          15 * time.Second,
+		RetryInterval:       5 * time.Second,
 	MaxConcurrentTrans:  1,
 	DispatchQueueSize:   defaultDispatchQueueSize,
 	MaxMessageCacheSize: 1000,
@@ -525,22 +596,22 @@ var DefaultConfig = Config{
 		SystemLangCode: "en",
 		ClientPlatform: types.ClientPlatformAndroid,
 	},
-	SkipUpdates:           true,
-	TransportMode:         TransportModeAbridged,
-	SavePeers:             true,
-	WebSocketTLS:          true,
-	FetchReplies:          true,
-	FetchTopics:           true,
-	FetchStories:          true,
-	FetchStickers:         true,
-	ReconnectEnabled:      true,
-	ReconnectBaseDelay:    1 * time.Second,
-	ReconnectMaxDelay:     60 * time.Second,
-	HealthEnabled:         true,
-	HealthPingInterval:    60 * time.Second,
-	HealthPongTimeout:     30 * time.Second,
-	UpdateQueueSize:       1024,
-	DurableUpdateQueue:    true,
-	MaxUpdateHandlerRetry: 3,
-	UpdateRecoveryEnabled: true,
+	SkipUpdates:        true,
+	TransportMode:      TransportModeAbridged,
+	SavePeers:          true,
+	WebSocketTLS:       true,
+	FetchReplies:       true,
+	FetchTopics:        true,
+	FetchStories:       true,
+	FetchStickers:      true,
+	ReconnectEnabled:   true,
+	ReconnectBaseDelay: 1 * time.Second,
+	ReconnectMaxDelay:  60 * time.Second,
+	HealthEnabled:      true,
+	HealthPingInterval: 60 * time.Second,
+	HealthPongTimeout:  30 * time.Second,
+	ConnPoolTTL:        10 * time.Second,
+	DCPoolSize:         1,
+	UploadPoolSize:     4,
+	EndpointCoolDown:   16 * time.Second,
 }

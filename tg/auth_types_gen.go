@@ -4,6 +4,7 @@ package tg
 
 import (
 	"bytes"
+	"fmt"
 )
 
 // SentCodeClass is the interface for TL type SentCode.
@@ -77,16 +78,20 @@ func (v *AuthSentCode) Encode(b *bytes.Buffer) error {
 // DecodeAuthSentCode deserializes a AuthSentCode from a reader using the TL binary protocol.
 func DecodeAuthSentCode(r *Reader) (*AuthSentCode, error) {
 	v := &AuthSentCode{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objType, _errType := ReadTLObject(r)
 	if _errType != nil {
 		return nil, _errType
 	}
-	v.Type = _objType.(SentCodeTypeClass)
+	_cType, _okType := _objType.(SentCodeTypeClass)
+	if !_okType {
+		return nil, fmt.Errorf("decode: field type: unexpected type %T", _objType)
+	}
+	v.Type = _cType
 	_rPhoneCodeHash, _ePhoneCodeHash := r.ReadString()
 	if _ePhoneCodeHash != nil {
 		return nil, _ePhoneCodeHash
@@ -97,7 +102,11 @@ func DecodeAuthSentCode(r *Reader) (*AuthSentCode, error) {
 		if _errNextType != nil {
 			return nil, _errNextType
 		}
-		v.NextType = _objNextType.(CodeTypeClass)
+		_cNextType, _okNextType := _objNextType.(CodeTypeClass)
+		if !_okNextType {
+			return nil, fmt.Errorf("decode: field next_type: unexpected type %T", _objNextType)
+		}
+		v.NextType = _cNextType
 	}
 	if v.Flags.Has(2) {
 		_rTimeout, _eTimeout := r.ReadInt32()
@@ -141,7 +150,11 @@ func DecodeAuthSentCodeSuccess(r *Reader) (*AuthSentCodeSuccess, error) {
 	if _errAuthorization != nil {
 		return nil, _errAuthorization
 	}
-	v.Authorization = _objAuthorization.(AuthorizationClass)
+	_cAuthorization, _okAuthorization := _objAuthorization.(AuthorizationClass)
+	if !_okAuthorization {
+		return nil, fmt.Errorf("decode: field authorization: unexpected type %T", _objAuthorization)
+	}
+	v.Authorization = _cAuthorization
 	return v, nil
 }
 
@@ -309,11 +322,11 @@ func (v *AuthAuthorization) Encode(b *bytes.Buffer) error {
 // DecodeAuthAuthorization deserializes a AuthAuthorization from a reader using the TL binary protocol.
 func DecodeAuthAuthorization(r *Reader) (*AuthAuthorization, error) {
 	v := &AuthAuthorization{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.SetupPasswordRequired = v.Flags.Has(1)
 	if v.Flags.Has(1) {
 		_rOtherwiseReloginDays, _eOtherwiseReloginDays := r.ReadInt32()
@@ -340,7 +353,11 @@ func DecodeAuthAuthorization(r *Reader) (*AuthAuthorization, error) {
 	if _errUser != nil {
 		return nil, _errUser
 	}
-	v.User = _objUser.(UserClass)
+	_cUser, _okUser := _objUser.(UserClass)
+	if !_okUser {
+		return nil, fmt.Errorf("decode: field user: unexpected type %T", _objUser)
+	}
+	v.User = _cUser
 	return v, nil
 }
 
@@ -384,17 +401,21 @@ func (v *AuthAuthorizationSignUpRequired) Encode(b *bytes.Buffer) error {
 // DecodeAuthAuthorizationSignUpRequired deserializes a AuthAuthorizationSignUpRequired from a reader using the TL binary protocol.
 func DecodeAuthAuthorizationSignUpRequired(r *Reader) (*AuthAuthorizationSignUpRequired, error) {
 	v := &AuthAuthorizationSignUpRequired{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_objTermsOfService, _errTermsOfService := ReadTLObject(r)
 		if _errTermsOfService != nil {
 			return nil, _errTermsOfService
 		}
-		v.TermsOfService = _objTermsOfService.(*HelpTermsOfService)
+		_cTermsOfService, _okTermsOfService := _objTermsOfService.(*HelpTermsOfService)
+		if !_okTermsOfService {
+			return nil, fmt.Errorf("decode: field terms_of_service: unexpected type %T", _objTermsOfService)
+		}
+		v.TermsOfService = _cTermsOfService
 	}
 	return v, nil
 }
@@ -480,11 +501,11 @@ func (v *Authorization) Encode(b *bytes.Buffer) error {
 // DecodeAuthorization deserializes a Authorization from a reader using the TL binary protocol.
 func DecodeAuthorization(r *Reader) (*Authorization, error) {
 	v := &Authorization{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Current = v.Flags.Has(0)
 	v.OfficialApp = v.Flags.Has(1)
 	v.PasswordPending = v.Flags.Has(2)
@@ -1142,11 +1163,11 @@ func (v *AuthSentCodeTypeEmailCode) Encode(b *bytes.Buffer) error {
 // DecodeAuthSentCodeTypeEmailCode deserializes a AuthSentCodeTypeEmailCode from a reader using the TL binary protocol.
 func DecodeAuthSentCodeTypeEmailCode(r *Reader) (*AuthSentCodeTypeEmailCode, error) {
 	v := &AuthSentCodeTypeEmailCode{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.AppleSigninAllowed = v.Flags.Has(0)
 	v.GoogleSigninAllowed = v.Flags.Has(1)
 	_rEmailPattern, _eEmailPattern := r.ReadString()
@@ -1217,11 +1238,11 @@ func (v *AuthSentCodeTypeSetUpEmailRequired) Encode(b *bytes.Buffer) error {
 // DecodeAuthSentCodeTypeSetUpEmailRequired deserializes a AuthSentCodeTypeSetUpEmailRequired from a reader using the TL binary protocol.
 func DecodeAuthSentCodeTypeSetUpEmailRequired(r *Reader) (*AuthSentCodeTypeSetUpEmailRequired, error) {
 	v := &AuthSentCodeTypeSetUpEmailRequired{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.AppleSigninAllowed = v.Flags.Has(0)
 	v.GoogleSigninAllowed = v.Flags.Has(1)
 	return v, nil
@@ -1340,11 +1361,11 @@ func (v *AuthSentCodeTypeFirebaseSms) Encode(b *bytes.Buffer) error {
 // DecodeAuthSentCodeTypeFirebaseSms deserializes a AuthSentCodeTypeFirebaseSms from a reader using the TL binary protocol.
 func DecodeAuthSentCodeTypeFirebaseSms(r *Reader) (*AuthSentCodeTypeFirebaseSms, error) {
 	v := &AuthSentCodeTypeFirebaseSms{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rNonce, _eNonce := r.ReadBytes()
 		if _eNonce != nil {
@@ -1428,11 +1449,11 @@ func (v *AuthSentCodeTypeSmsWord) Encode(b *bytes.Buffer) error {
 // DecodeAuthSentCodeTypeSmsWord deserializes a AuthSentCodeTypeSmsWord from a reader using the TL binary protocol.
 func DecodeAuthSentCodeTypeSmsWord(r *Reader) (*AuthSentCodeTypeSmsWord, error) {
 	v := &AuthSentCodeTypeSmsWord{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rBeginning, _eBeginning := r.ReadString()
 		if _eBeginning != nil {
@@ -1483,11 +1504,11 @@ func (v *AuthSentCodeTypeSmsPhrase) Encode(b *bytes.Buffer) error {
 // DecodeAuthSentCodeTypeSmsPhrase deserializes a AuthSentCodeTypeSmsPhrase from a reader using the TL binary protocol.
 func DecodeAuthSentCodeTypeSmsPhrase(r *Reader) (*AuthSentCodeTypeSmsPhrase, error) {
 	v := &AuthSentCodeTypeSmsPhrase{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rBeginning, _eBeginning := r.ReadString()
 		if _eBeginning != nil {
@@ -2053,11 +2074,11 @@ func (v *URLAuthResultRequest) Encode(b *bytes.Buffer) error {
 // DecodeURLAuthResultRequest deserializes a URLAuthResultRequest from a reader using the TL binary protocol.
 func DecodeURLAuthResultRequest(r *Reader) (*URLAuthResultRequest, error) {
 	v := &URLAuthResultRequest{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.RequestWriteAccess = v.Flags.Has(0)
 	v.RequestPhoneNumber = v.Flags.Has(1)
 	v.MatchCodesFirst = v.Flags.Has(5)
@@ -2066,7 +2087,11 @@ func DecodeURLAuthResultRequest(r *Reader) (*URLAuthResultRequest, error) {
 	if _errBot != nil {
 		return nil, _errBot
 	}
-	v.Bot = _objBot.(UserClass)
+	_cBot, _okBot := _objBot.(UserClass)
+	if !_okBot {
+		return nil, fmt.Errorf("decode: field bot: unexpected type %T", _objBot)
+	}
+	v.Bot = _cBot
 	_rDomain, _eDomain := r.ReadString()
 	if _eDomain != nil {
 		return nil, _eDomain
@@ -2164,11 +2189,11 @@ func (v *URLAuthResultAccepted) Encode(b *bytes.Buffer) error {
 // DecodeURLAuthResultAccepted deserializes a URLAuthResultAccepted from a reader using the TL binary protocol.
 func DecodeURLAuthResultAccepted(r *Reader) (*URLAuthResultAccepted, error) {
 	v := &URLAuthResultAccepted{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rURL, _eURL := r.ReadString()
 		if _eURL != nil {
@@ -2352,7 +2377,11 @@ func DecodeAuthLoginTokenSuccess(r *Reader) (*AuthLoginTokenSuccess, error) {
 	if _errAuthorization != nil {
 		return nil, _errAuthorization
 	}
-	v.Authorization = _objAuthorization.(AuthorizationClass)
+	_cAuthorization, _okAuthorization := _objAuthorization.(AuthorizationClass)
+	if !_okAuthorization {
+		return nil, fmt.Errorf("decode: field authorization: unexpected type %T", _objAuthorization)
+	}
+	v.Authorization = _cAuthorization
 	return v, nil
 }
 
@@ -2399,11 +2428,11 @@ func (v *AuthLoggedOut) Encode(b *bytes.Buffer) error {
 // DecodeAuthLoggedOut deserializes a AuthLoggedOut from a reader using the TL binary protocol.
 func DecodeAuthLoggedOut(r *Reader) (*AuthLoggedOut, error) {
 	v := &AuthLoggedOut{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rFutureAuthToken, _eFutureAuthToken := r.ReadBytes()
 		if _eFutureAuthToken != nil {
@@ -2470,11 +2499,11 @@ func (v *Passkey) Encode(b *bytes.Buffer) error {
 // DecodePasskey deserializes a Passkey from a reader using the TL binary protocol.
 func DecodePasskey(r *Reader) (*Passkey, error) {
 	v := &Passkey{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rID, _eID := r.ReadString()
 	if _eID != nil {
 		return nil, _eID
@@ -2542,7 +2571,11 @@ func DecodeAuthPasskeyLoginOptions(r *Reader) (*AuthPasskeyLoginOptions, error) 
 	if _errOptions != nil {
 		return nil, _errOptions
 	}
-	v.Options = _objOptions.(*DataJSON)
+	_cOptions, _okOptions := _objOptions.(*DataJSON)
+	if !_okOptions {
+		return nil, fmt.Errorf("decode: field options: unexpected type %T", _objOptions)
+	}
+	v.Options = _cOptions
 	return v, nil
 }
 
@@ -2600,7 +2633,11 @@ func DecodeInputPasskeyResponseRegister(r *Reader) (*InputPasskeyResponseRegiste
 	if _errClientData != nil {
 		return nil, _errClientData
 	}
-	v.ClientData = _objClientData.(*DataJSON)
+	_cClientData, _okClientData := _objClientData.(*DataJSON)
+	if !_okClientData {
+		return nil, fmt.Errorf("decode: field client_data: unexpected type %T", _objClientData)
+	}
+	v.ClientData = _cClientData
 	_rAttestationData, _eAttestationData := r.ReadBytes()
 	if _eAttestationData != nil {
 		return nil, _eAttestationData
@@ -2647,7 +2684,11 @@ func DecodeInputPasskeyResponseLogin(r *Reader) (*InputPasskeyResponseLogin, err
 	if _errClientData != nil {
 		return nil, _errClientData
 	}
-	v.ClientData = _objClientData.(*DataJSON)
+	_cClientData, _okClientData := _objClientData.(*DataJSON)
+	if !_okClientData {
+		return nil, fmt.Errorf("decode: field client_data: unexpected type %T", _objClientData)
+	}
+	v.ClientData = _cClientData
 	_rAuthenticatorData, _eAuthenticatorData := r.ReadBytes()
 	if _eAuthenticatorData != nil {
 		return nil, _eAuthenticatorData
@@ -2732,7 +2773,11 @@ func DecodeInputPasskeyCredentialPublicKey(r *Reader) (*InputPasskeyCredentialPu
 	if _errResponse != nil {
 		return nil, _errResponse
 	}
-	v.Response = _objResponse.(InputPasskeyResponseClass)
+	_cResponse, _okResponse := _objResponse.(InputPasskeyResponseClass)
+	if !_okResponse {
+		return nil, fmt.Errorf("decode: field response: unexpected type %T", _objResponse)
+	}
+	v.Response = _cResponse
 	return v, nil
 }
 
@@ -2775,6 +2820,52 @@ func DecodeInputPasskeyCredentialFirebasePnv(r *Reader) (*InputPasskeyCredential
 func init() {
 	Registry[InputPasskeyCredentialFirebasePnvTypeID] = func(r *Reader) (TLObject, error) {
 		return DecodeInputPasskeyCredentialFirebasePnv(r)
+	}
+}
+
+// AuthFirebasePnvIntentTypeID is the constructor ID for TL type auth.firebasePnvIntent.
+const AuthFirebasePnvIntentTypeID = 0xdf5ac00c
+
+// AuthFirebasePnvIntent represents the TL constructor auth.firebasePnvIntent (0xdf5ac00c).
+//
+// See https://core.telegram.org/constructor/auth.firebasePnvIntent for reference.
+type AuthFirebasePnvIntent struct {
+	Nonce                    string `json:"nonce,omitempty"`
+	DigitalCredentialPayload string `json:"digital_credential_payload,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0xdf5ac00c.
+func (v *AuthFirebasePnvIntent) ConstructorID() uint32 {
+	return AuthFirebasePnvIntentTypeID
+}
+
+// Encode serializes AuthFirebasePnvIntent to a bytes.Buffer using the TL binary protocol.
+func (v *AuthFirebasePnvIntent) Encode(b *bytes.Buffer) error {
+	WriteInt(b, AuthFirebasePnvIntentTypeID)
+	WriteString(b, v.Nonce)
+	WriteString(b, v.DigitalCredentialPayload)
+	return nil
+}
+
+// DecodeAuthFirebasePnvIntent deserializes a AuthFirebasePnvIntent from a reader using the TL binary protocol.
+func DecodeAuthFirebasePnvIntent(r *Reader) (*AuthFirebasePnvIntent, error) {
+	v := &AuthFirebasePnvIntent{}
+	_rNonce, _eNonce := r.ReadString()
+	if _eNonce != nil {
+		return nil, _eNonce
+	}
+	v.Nonce = _rNonce
+	_rDigitalCredentialPayload, _eDigitalCredentialPayload := r.ReadString()
+	if _eDigitalCredentialPayload != nil {
+		return nil, _eDigitalCredentialPayload
+	}
+	v.DigitalCredentialPayload = _rDigitalCredentialPayload
+	return v, nil
+}
+
+func init() {
+	Registry[AuthFirebasePnvIntentTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeAuthFirebasePnvIntent(r)
 	}
 }
 

@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -44,9 +45,9 @@ var (
 	// ErrDHNonceMismatch is returned during key exchange step 8 when the
 	// nonce in the DH inner data does not match the expected value.
 	ErrDHNonceMismatch = errors.New("step 8: nonce mismatch in dh inner data")
-	// ErrNewNonceHashMismatch is returned during key exchange step 10 when
-	// the new_nonce_hash1 value does not match the expected hash.
-	ErrNewNonceHashMismatch = errors.New("step 10: new_nonce_hash1 mismatch")
+	// ErrNewNonceHashMismatch is returned during key exchange when a
+	// new_nonce_hash value does not match the expected hash.
+	ErrNewNonceHashMismatch = errors.New("session: new_nonce_hash mismatch")
 	// ErrDHGenRetry is returned during key exchange step 10 when the server
 	// responds with dh_gen_retry, indicating the client should retry with a
 	// new nonce.
@@ -72,15 +73,48 @@ var (
 	// No bytes are written to the transport when this error is returned.
 	ErrBusy = errors.New("session: too many pending RPCs")
 
-	// ErrTooManyPending is returned when the number of unknown queries
-	// to recover after reconnect exceeds the recovery cap (1024).
-	// Ported from td/td/telegram/net/Session.cpp:1297-1309 (MAX_INFLIGHT_QUERIES).
-	ErrTooManyPending = errors.New("session: too many pending queries to recover")
-
 	// ErrWriteCircuitOpen is returned when the write circuit breaker has
 	// tripped due to consecutive write failures.
 	ErrWriteCircuitOpen = errors.New("session: write circuit breaker open")
+
+	// ErrMsgNotReceived indicates the server reported via msgs_state_info that
+	// a sent message was not received. The caller should retry.
+	ErrMsgNotReceived = errors.New("session: message not received by server")
+
+	// ErrRPCDropped indicates the pending RPC was dropped by the client via
+	// rpc_drop_answer. The original caller receives this error.
+	ErrRPCDropped = errors.New("session: rpc dropped by client")
 )
+
+// DeliveryState describes what is known about an RPC when its connection dies.
+type DeliveryState uint8
+
+const (
+	// DeliveryUnknown means bytes may have reached Telegram, but no ACK arrived.
+	DeliveryUnknown DeliveryState = iota
+	// DeliveryReceived means Telegram acknowledged the request before disconnect.
+	DeliveryReceived
+)
+
+func (s DeliveryState) String() string {
+	if s == DeliveryReceived {
+		return "received"
+	}
+	return "unknown"
+}
+
+// DeliveryError prevents callers from treating an uncertain write as a
+// definitely unsent request. Err retains the underlying transport/session error.
+type DeliveryError struct {
+	State DeliveryState
+	Err   error
+}
+
+func (e *DeliveryError) Error() string {
+	return fmt.Sprintf("session: RPC delivery %s: %v", e.State, e.Err)
+}
+
+func (e *DeliveryError) Unwrap() error { return e.Err }
 
 // ErrorClass classifies a transport or session error for reconnect decisions.
 type ErrorClass int

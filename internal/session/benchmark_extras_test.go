@@ -3,8 +3,6 @@ package session
 import (
 	"testing"
 	"time"
-
-	"github.com/mtgo-labs/mtgo/tg"
 )
 
 // --- Container tracker ---
@@ -78,17 +76,6 @@ func BenchmarkMsgFactoryAllocateSeqNo(b *testing.B) {
 	}
 }
 
-// --- Flood wait queue ---
-
-func BenchmarkFloodWaitQueueDelay(b *testing.B) {
-	fq := &FloodWaitQueue{}
-	query := &tg.PingRequest{PingID: 42}
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		fq.Delay(query, int64(i), 30*time.Second)
-	}
-}
-
 // --- Msg ID validator ---
 
 func BenchmarkMsgIDValidatorCheck(b *testing.B) {
@@ -111,5 +98,33 @@ func BenchmarkDCOptionPoolFindBest(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		_, _ = pool.FindBest()
+	}
+}
+
+// --- Warm connection pool ---
+
+type benchmarkCloser struct{}
+
+func (*benchmarkCloser) Close() error { return nil }
+
+func BenchmarkConnectionPoolMiss(b *testing.B) {
+	pool := NewConnectionPool(10 * time.Second)
+	b.Cleanup(pool.Close)
+	endpoint := DataCenter{ID: 2}
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = pool.Get(endpoint.ID, endpoint)
+	}
+}
+
+func BenchmarkConnectionPoolPutGet(b *testing.B) {
+	pool := NewConnectionPool(10 * time.Second)
+	b.Cleanup(pool.Close)
+	endpoint := DataCenter{ID: 2}
+	conn := &benchmarkCloser{}
+	b.ReportAllocs()
+	for b.Loop() {
+		pool.Put(endpoint.ID, endpoint, conn)
+		_, _ = pool.Get(endpoint.ID, endpoint)
 	}
 }

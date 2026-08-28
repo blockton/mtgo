@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -58,8 +59,13 @@ func main() {
 		fmt.Fprintf(&b, "}\n\n")
 	}
 
-	if err := os.WriteFile(outputFile, []byte(b.String()), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "write error: %v\n", err)
+	src, err := format.Source([]byte(b.String()))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "format error: %v\nwriting unformatted output\n", err)
+		src = []byte(b.String())
+	}
+	if err := os.WriteFile(outputFile, src, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write %s: %v\n", outputFile, err)
 		os.Exit(1)
 	}
 
@@ -111,6 +117,14 @@ func parseTSV(path string, seen map[string]bool) []errorDef {
 		goName := "Err" + pascal
 		isFunc := "Is" + pascal
 
+		// Deduplicate by Go name: different constant strings (e.g.
+		// GROUP_CALL_INVALID vs GROUPCALL_INVALID) can collapse to the same
+		// identifier after PascalCase conversion. Keep the first occurrence.
+		if seen[goName] {
+			continue
+		}
+		seen[goName] = true
+
 		defs = append(defs, errorDef{
 			GoName: goName,
 			Const:  constValue,
@@ -138,7 +152,32 @@ func toPascalCase(s string) string {
 	return b.String()
 }
 
+// pascalOverrides maps TSV tokens to their exact PascalCase rendering.
+// Pure acronyms (ID, API, URL) are uppercased as-is per golint convention.
+// Compound tokens (MSGID, GROUPCALL) that merge words without an underscore
+// get an explicit mixed-case form, since titlePart() can't split them.
+var pascalOverrides = map[string]string{
+	// Pure acronyms — returned as-is.
+	"2FA": "2FA", "API": "API", "CDN": "CDN", "DC": "DC", "DH": "DH",
+	"ID": "ID", "IDS": "IDS", "JSON": "JSON", "MD5": "MD5", "MIME": "MIME",
+	"MSG": "MSG", "MT": "MT", "NA": "NA", "PNG": "PNG", "PTS": "PTS",
+	"QTS": "QTS", "RPC": "RPC", "RSA": "RSA", "SHA256": "SHA256",
+	"SMS": "SMS", "SRP": "SRP", "SSRC": "SSRC", "TGS": "TGS",
+	"TTL": "TTL", "URL": "URL",
+	// Compound tokens — explicit split (matches gotd TL naming).
+	"CHATLINK": "ChatLink", "CHATLINKS": "ChatLinks",
+	"CHATLIST": "ChatList", "CHATLISTS": "ChatLists",
+	"FILEREF": "FileRef", "GROUPCALL": "GroupCall",
+	"MSGID": "MsgID", "STARGIFT": "StarGift", "STARGIFTS": "StarGifts",
+	"STARREF": "StarRef", "STICKERPACK": "StickerPack",
+	"STICKERSET": "StickerSet", "WEBDOCUMENT": "WebDocument",
+	"WEBPAGE": "WebPage", "WEBPUSH": "WebPush", "WEBVIEW": "WebView",
+}
+
 func titlePart(s string) string {
+	if v, ok := pascalOverrides[s]; ok {
+		return v
+	}
 	if len(s) == 0 {
 		return s
 	}

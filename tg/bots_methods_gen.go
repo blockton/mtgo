@@ -1529,8 +1529,8 @@ const BotsRequestWebViewButtonTypeID = 0x31a2a35e
 //
 // See https://core.telegram.org/method/bots/requestWebViewButton for reference.
 type BotsRequestWebViewButtonRequest struct {
-	UserID InputUserClass      `json:"user_id,omitempty"`
-	Button KeyboardButtonClass `json:"button,omitempty"`
+	UserID InputUserClass  `json:"user_id,omitempty"`
+	Button *KeyboardButton `json:"button,omitempty"`
 }
 
 // ConstructorID returns the TL constructor identifier 0x31a2a35e.
@@ -1597,14 +1597,14 @@ func (v *BotsGetRequestedWebViewButtonRequest) Encode(b *bytes.Buffer) error {
 //   - req: the request parameters
 //
 // Returns the result of the RPC call, or an error if the invocation fails.
-func (c *RPCClient) BotsGetRequestedWebViewButton(ctx context.Context, req *BotsGetRequestedWebViewButtonRequest) (KeyboardButtonClass, error) {
+func (c *RPCClient) BotsGetRequestedWebViewButton(ctx context.Context, req *BotsGetRequestedWebViewButtonRequest) (*KeyboardButton, error) {
 	result, err := c.invoke(ctx, req, func(r *Reader) (TLObject, error) {
 		return ReadTLObject(r)
 	})
 	if err != nil {
 		return nil, err
 	}
-	if _c, _ok := result.(KeyboardButtonClass); _ok {
+	if _c, _ok := result.(*KeyboardButton); _ok {
 		return _c, nil
 	}
 	return nil, fmt.Errorf("unexpected result type %T", result)

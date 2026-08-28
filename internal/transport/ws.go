@@ -86,12 +86,26 @@ func DialWebsocket(ctx context.Context, addr string) (net.Conn, error) {
 		return nil, fmt.Errorf("ws: dial: %w", err)
 	}
 
-	obfsConn, err := dialObfuscated2(wsConn, 0xEE)
+	return WrapObfuscatedWS(wsConn)
+}
+
+// WrapObfuscatedWS wraps an already-connected WebSocket bytestream with the
+// MTProto obfuscated2 framing layer (initiator mode, 0xEE marker).
+//
+// This is intended for custom WebSocket dialers that obtain the underlying
+// stream themselves (e.g. a browser WebSocket via syscall/js in GOOS=js builds,
+// which performs its own TLS and HTTP upgrade) and only need the obfuscation
+// layer applied on top. The returned net.Conn is suitable for use with
+// NewTCPIntermediateNoHeader.
+//
+// On error the connection is closed; on success the caller owns the returned
+// conn.
+func WrapObfuscatedWS(conn net.Conn) (net.Conn, error) {
+	obfsConn, err := dialObfuscated2(conn, 0xEE)
 	if err != nil {
-		wsConn.Close()
+		conn.Close()
 		return nil, err
 	}
-
 	return &wsConnCloser{Conn: obfsConn}, nil
 }
 
@@ -113,17 +127,24 @@ func dialWebsocketTCP(ctx context.Context, addr string) (net.Conn, error) {
 	addrHost := net.JoinHostPort(host, port)
 
 	if u.Scheme == "wss" {
-		dialer := &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
+		// Use tls.Dialer.DialContext so ctx governs both the TCP connect and the
+		// TLS handshake; tls.DialWithDialer ignores ctx and can block for up to
+		// the dialer's Timeout even after the session is closed.
+		d := &tls.Dialer{
+			NetDialer: &net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			},
+			Config: &tls.Config{
+				ServerName: host,
+				MinVersion: tls.VersionTLS12,
+			},
 		}
-		conn, err := tls.DialWithDialer(dialer, "tcp", addrHost, &tls.Config{
-			ServerName: host,
-			MinVersion: tls.VersionTLS12,
-		})
+		conn, err := d.DialContext(ctx, "tcp", addrHost)
 		if err != nil {
 			return nil, fmt.Errorf("ws: tls dial: %w", err)
 		}
+		_ = SetTCPNoDelay(conn, true)
 		return conn, nil
 	}
 
@@ -132,6 +153,7 @@ func dialWebsocketTCP(ctx context.Context, addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	_ = SetTCPNoDelay(conn, true)
 	return conn, nil
 }
 

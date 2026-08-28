@@ -6,9 +6,9 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"strconv"
-	"strings"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,64 +24,6 @@ type sessionLogger interface {
 	Debugf(format string, v ...any)
 	Warnf(format string, v ...any)
 	Errorf(format string, v ...any)
-}
-
-// FloodWaitQueue manages delayed queries waiting for FLOOD_WAIT.
-// Ported from td/td/telegram/net/NetQueryDelayer.h:18-36.
-type FloodWaitQueue struct {
-	entries []FloodWaitEntry
-	mu      sync.Mutex
-}
-
-// FloodWaitEntry is a delayed query.
-type FloodWaitEntry struct {
-	Query     tg.TLObject
-	MsgID     int64
-	WaitUntil time.Time
-	Attempts  int
-}
-
-func (q *FloodWaitQueue) Delay(query tg.TLObject, msgID int64, waitDuration time.Duration) {
-	if q == nil || query == nil {
-		return
-	}
-	q.mu.Lock()
-	q.entries = append(q.entries, FloodWaitEntry{
-		Query:     query,
-		MsgID:     msgID,
-		WaitUntil: time.Now().Add(waitDuration),
-		Attempts:  1,
-	})
-	q.mu.Unlock()
-}
-
-func (q *FloodWaitQueue) Ready() []FloodWaitEntry {
-	if q == nil {
-		return nil
-	}
-	now := time.Now()
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	ready := make([]FloodWaitEntry, 0)
-	pending := q.entries[:0]
-	for _, entry := range q.entries {
-		if !entry.WaitUntil.After(now) {
-			ready = append(ready, entry)
-			continue
-		}
-		pending = append(pending, entry)
-	}
-	q.entries = pending
-	return ready
-}
-
-func (q *FloodWaitQueue) Cleanup() {
-	if q == nil {
-		return
-	}
-	q.mu.Lock()
-	q.entries = nil
-	q.mu.Unlock()
 }
 
 // authKeyLength is the required size in bytes of an MTProto authorization key.
@@ -107,21 +49,30 @@ type Transport interface {
 	SetReadDeadline(t time.Time) error
 }
 
+type httpWaitTransport interface {
+	HTTPWaitParams() (maxDelay, waitAfter, maxWait int32, enabled bool)
+	StartHTTPWait(frame func(context.Context) ([]byte, error))
+}
+
 const (
 	numFutureSalts       = 4
 	initialSaltFetchWait = 15 * time.Second
 	saltFetchInterval    = time.Hour
 	ackFlushInterval     = 30 * time.Second
+	slowWriteThreshold   = 3 * time.Second
 )
 
 // hasDecodedResults returns true if any goroutine is waiting for a decoded TL
 // RPC result. Raw result waiters are tracked separately so they do not force
 // TL decoding or gzip unpacking.
 func (s *Session) hasDecodedResults() bool {
-	return s.pending.HasAny()
+	return s.pending.HasAnyDecoded()
 }
 
 func (s *Session) checkWrite() error {
+	if s.stopping.Load() {
+		return ErrSessionClosed
+	}
 	switch s.sm.State() {
 	case StateActive, StateConnecting:
 		return nil
@@ -139,199 +90,20 @@ func (s *Session) checkWrite() error {
 // the established auth key, server salt, and server time.
 type AuthFunc func(transport Transport) (*AuthResult, error)
 
-// SessionSlotType identifies the traffic class for a session slot.
-// Ported from td/td/telegram/net/NetQueryDispatcher.h:69-78 (Dc session types).
-type SessionSlotType int
+type pfsRecoveryContextKey struct{}
 
-const (
-	// SlotMain handles API calls, updates, and non-media RPCs.
-	SlotMain SessionSlotType = iota
-	// SlotUpload handles upload.* methods.
-	SlotUpload
-	// SlotDownload handles messages.getDocument, messages.getWebPage.
-	SlotDownload
-)
-
-func (t SessionSlotType) String() string {
-	switch t {
-	case SlotMain:
-		return "main"
-	case SlotUpload:
-		return "upload"
-	case SlotDownload:
-		return "download"
-	default:
-		return "unknown"
-	}
+type messageIDBoundQuery interface {
+	tg.TLObject
+	prepareForMessageID(msgID int64) (tg.TLObject, error)
 }
 
-// RouteQuery returns the slot type for a given TLObject.
-// Ported from td/td/telegram/net/SessionProxy.cpp (is_upload/is_download flags).
-func RouteQuery(query tg.TLObject) SessionSlotType {
-	switch query.(type) {
-	case *tg.UploadSaveFilePartRequest,
-		*tg.UploadSaveBigFilePartRequest:
-		return SlotUpload
-	case *tg.UploadGetFileRequest,
-		*tg.UploadGetWebFileRequest,
-		*tg.UploadGetCDNFileRequest:
-		return SlotDownload
-	}
-	return SlotMain
-}
-
-// SessionSlot manages an independent MTProto session for a traffic class within
-// a DC. Each slot has its own message ID sequence and sequence number but shares
-// the DC's permanent auth key.
-// Ported from td/td/telegram/net/SessionProxy.cpp (open_session/close_session).
-type SessionSlot struct {
-	dcID         int
-	slotType     SessionSlotType
-	session      *Session
-	active       atomic.Bool
-	lastActivity atomic.Int64 // unix timestamp
-	idleTimeout  time.Duration
-}
-
-// NewSessionSlot creates a new session slot for the given DC and traffic type.
-func NewSessionSlot(dcID int, slotType SessionSlotType, idleTimeout time.Duration) *SessionSlot {
-	return &SessionSlot{
-		dcID:        dcID,
-		slotType:    slotType,
-		idleTimeout: idleTimeout,
-	}
-}
-
-// Invoke sends an RPC through this slot's session and updates activity timestamp.
-func (ss *SessionSlot) Invoke(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error) {
-	if ss.session == nil {
-		return nil, ErrSessionClosed
-	}
-	ss.lastActivity.Store(time.Now().Unix())
-	ss.active.Store(true)
-	defer ss.active.Store(false)
-	return ss.session.Invoke(ctx, query, retries, timeout)
-}
-
-// Start sets the underlying session and transport for this slot.
-func (ss *SessionSlot) Start(s *Session, tp Transport, timeout time.Duration) error {
-	ss.session = s
-	ss.lastActivity.Store(time.Now().Unix())
-	return s.Connect(tp, timeout)
-}
-
-// Stop closes the underlying session.
-func (ss *SessionSlot) Stop() {
-	if ss.session != nil {
-		ss.session.Stop()
-		ss.session = nil
-	}
-}
-
-// IsActive reports whether this slot has pending RPCs.
-func (ss *SessionSlot) IsActive() bool {
-	return ss.active.Load()
-}
-
-// LastActivity returns the last time this slot had RPC activity.
-func (ss *SessionSlot) LastActivity() time.Time {
-	return time.Unix(ss.lastActivity.Load(), 0)
-}
-
-// SlotType returns the traffic class of this slot.
-func (ss *SessionSlot) SlotType() SessionSlotType {
-	return ss.slotType
-}
-
-// SessionRouter manages SessionSlots per DC, routing queries to the appropriate
-// slot based on operation type.
-// Ported from td/td/telegram/net/NetQueryDispatcher.h:69-78 (Dc struct).
-type SessionRouter struct {
-	slots       map[int]map[SessionSlotType]*SessionSlot // dcID → slotType → slot
-	idleTimeout time.Duration
-	mu          sync.Mutex
-}
-
-// NewSessionRouter creates a new session router with the given idle timeout.
-func NewSessionRouter(idleTimeout time.Duration) *SessionRouter {
-	return &SessionRouter{
-		slots:       make(map[int]map[SessionSlotType]*SessionSlot),
-		idleTimeout: idleTimeout,
-	}
-}
-
-// Invoke routes a query to the appropriate session slot based on its type.
-// Creates the slot lazily on first use.
-func (r *SessionRouter) Invoke(ctx context.Context, dcID int, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error) {
-	slotType := RouteQuery(query)
-	slot := r.GetOrCreateSlot(dcID, slotType)
-	return slot.Invoke(ctx, query, retries, timeout)
-}
-
-// GetOrCreateSlot returns the slot for the given DC and type, creating it if needed.
-func (r *SessionRouter) GetOrCreateSlot(dcID int, slotType SessionSlotType) *SessionSlot {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.slots[dcID]; !ok {
-		r.slots[dcID] = make(map[SessionSlotType]*SessionSlot)
-	}
-	if slot, ok := r.slots[dcID][slotType]; ok {
-		return slot
-	}
-	slot := NewSessionSlot(dcID, slotType, r.idleTimeout)
-	r.slots[dcID][slotType] = slot
-	return slot
-}
-
-// CloseIdleSlots closes upload/download slots that have been idle longer than
-// the configured timeout. Main slots are never closed by idle timeout.
-// Ported from td/td/telegram/net/Session.cpp:1513 (ACTIVITY_TIMEOUT).
-func (r *SessionRouter) CloseIdleSlots() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	now := time.Now()
-	closed := 0
-	for dcID, dcSlots := range r.slots {
-		for slotType, slot := range dcSlots {
-			if slotType == SlotMain {
-				continue // main slot never closed by idle timeout
-			}
-			if !slot.IsActive() && now.Sub(slot.LastActivity()) > slot.idleTimeout {
-				slot.Stop()
-				delete(dcSlots, slotType)
-				closed++
-			}
-		}
-		if len(dcSlots) == 0 {
-			delete(r.slots, dcID)
-		}
-	}
-	return closed
-}
-
-// StopAll stops all slots across all DCs.
-func (r *SessionRouter) StopAll() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, dcSlots := range r.slots {
-		for _, slot := range dcSlots {
-			slot.Stop()
-		}
-	}
-	r.slots = make(map[int]map[SessionSlotType]*SessionSlot)
-}
-
-// SlotCount returns the number of active slots across all DCs.
-func (r *SessionRouter) SlotCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	count := 0
-	for _, dcSlots := range r.slots {
-		count += len(dcSlots)
-	}
-	return count
+// sessionShutdownCause captures the first error that terminated a session
+// for diagnostic purposes. Stored atomically via Session.shutdownCause;
+// first writer wins so cascading goroutine exits never overwrite the root cause.
+type sessionShutdownCause struct {
+	err    error
+	source string
+	at     time.Time
 }
 
 // Session manages an encrypted MTProto session with a Telegram data center.
@@ -379,13 +151,25 @@ type Session struct {
 	// sm is the session connection state machine.
 	sm *stateMachine
 	// mu protects the mutable config fields below: authKey, authKeyID,
-	// transport, pingInterval, onUpdate, onPanic.
+	// transport, pingInterval, onUpdate, onPanic, onNewSession.
 	mu sync.RWMutex
+	// transportCloseMu serializes attachment with physical transport Close so a
+	// teardown caller cannot return while another shutdown path is still closing.
+	transportCloseMu sync.Mutex
+	// lifecycleMu serializes Run/Start/Connect setup. runMu protects cancellation
+	// state so Stop can cancel a startup ping without waiting behind setup.
+	lifecycleMu sync.Mutex
+	runMu       sync.Mutex
 
 	// transport is the underlying network transport for sending/receiving data.
 	transport Transport
 	// pfs manages the PFS temporary auth key lifecycle. nil when PFS is disabled.
 	pfs *TempKeyManager
+	// pfsRecoveryMu coalesces live rebinds; pfsWriteMu pauses application writes
+	// until the required initConnection rewrite succeeds.
+	pfsRecoveryMu sync.Mutex
+	pfsWriteMu    sync.RWMutex
+	pfsInit       func(context.Context) error
 	// writeMux serializes writes to the transport. Every outbound message
 	// (RPC, service, ack, ping) acquires this mutex, writes directly, and
 	// releases it. No goroutine hop, no channel, no silent drops.
@@ -401,6 +185,16 @@ type Session struct {
 	// pingCbs maps pingID to a channel that is closed when the matching
 	// pong is received.
 	pingCbs map[int64]chan struct{}
+	// Ping health values are lock-free because they are read by observability
+	// while the ping loop updates them.
+	rttEWMA     atomic.Int64
+	rttVariance atomic.Int64
+	lastPong    atomic.Int64
+	// lastActivityTime is updated on every inbound message, enabling
+	// adaptive read-timeout detection of dead connections for active
+	// sessions without waiting for the full ping cycle.
+	lastActivityTime atomic.Int64
+	onRTT            func(time.Duration, time.Duration)
 	// ackCh is a channel consumed by ackLoop to batch and send message
 	// acknowledgments.
 	ackCh chan int64
@@ -413,6 +207,8 @@ type Session struct {
 	runCancel context.CancelFunc
 	// runDone is closed when the background run exits.
 	runDone chan struct{}
+	// setupDone covers ConnectWithAuth work before runDone is published.
+	setupDone chan struct{}
 	// group holds the errgroup created during runInit. runLoop adds remaining
 	// goroutines to it.
 	group *errGroup
@@ -420,21 +216,41 @@ type Session struct {
 	// onUpdate is called when the server pushes unsolicited updates.
 	onUpdate func(tg.TLObject)
 	// updateSem bounds the number of concurrent update dispatch goroutines.
-	updateSem chan struct{}
+	// dispatchSem bounds the number of concurrent dispatchRaw goroutines to
+	// prevent goroutine explosion under message flood (#23).
+	updateSem   chan struct{}
+	dispatchSem chan struct{}
 	// onPanic is called (if non-nil) when a dispatch goroutine panics.
 	onPanic func(panicValue any)
+	// onNewSession is called when the server sends a new_session_created
+	// notification, indicating the previous session was destroyed. The
+	// callback fires in the receive goroutine; long work should be
+	// dispatched to a new goroutine.
+	onNewSession func(firstMsgID int64, uniqueID int64, serverSalt int64)
 	// log receives structured log output. When nil, logging is suppressed.
 	log sessionLogger
 
-	consecWriteFailures   int
-	writeBreakerThreshold int
+	consecWriteFailures   atomic.Int32
+	writeBreakerThreshold atomic.Int32
 	writeBreakerOpen      atomic.Bool
+	// connectedAt is set when the session reaches StateActive and cleared on
+	// reset. It enables diagnostic error messages that report how long the
+	// connection was alive before it died.
+	connectedAt atomic.Pointer[time.Time]
+
+	stopping      atomic.Bool
+	shutdownCause atomic.Pointer[sessionShutdownCause]
 
 	// Production-hardening fields (end of struct to keep hot-path fields in
 	// the first 6 cache lines — only accessed when features are enabled).
 	containerTracker *ContainerTracker
-	floodWaits       *FloodWaitQueue
 	outboundBatcher  *OutboundBatcher
+	stateReqMu       sync.Mutex
+	stateReqs        map[int64]*pendingStateReq
+
+	// chainMu protects chains, used for G13 invokeAfterMsg ordering.
+	chainMu sync.Mutex
+	chains  map[int64]int64 // chainID → last sent msg_id
 }
 
 // SetOnPanic sets a callback invoked when a dispatchUpdate goroutine panics.
@@ -444,14 +260,30 @@ func (s *Session) SetOnPanic(fn func(panicValue any)) {
 	s.mu.Unlock()
 }
 
+// SetOnNewSession registers a callback that fires when the server sends a
+// new_session_created notification. This indicates that a previous session
+// was destroyed and any updates received in between may have been lost.
+// The callback fires in the receive goroutine — dispatch long work to a
+// new goroutine to avoid blocking the receive loop.
+func (s *Session) SetOnNewSession(fn func(firstMsgID int64, uniqueID int64, serverSalt int64)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onNewSession = fn
+}
+
 // EnableOutboundBatching creates and starts an OutboundBatcher on this session.
-// When enabled, Send coalesces concurrent RPCs into msg_container messages.
+// When enabled, Send coalesces low-priority RPCs into msg_container messages;
+// high-priority RPCs continue to write directly.
 // Pass maxContainerBytes=0 for the default 1 MiB, and coalesceWindow=0 for the
-// default 1ms. Call before sending RPCs. To disable, call CloseOutboundBatching.
+// default 10ms. Call before sending RPCs. To disable, call CloseOutboundBatching.
 func (s *Session) EnableOutboundBatching(maxContainerBytes int, coalesceWindow time.Duration) {
 	b := NewOutboundBatcher(s, maxContainerBytes, coalesceWindow)
-	b.Start()
 	s.mu.Lock()
+	if s.stopping.Load() || s.sm.State() != StateActive || s.outboundBatcher != nil {
+		s.mu.Unlock()
+		return
+	}
+	b.Start()
 	s.outboundBatcher = b
 	s.mu.Unlock()
 }
@@ -482,7 +314,22 @@ func (s *Session) BatcherSnapshot() OutboundSnapshot {
 // SessionDone returns a channel that is closed when the background Run loop
 // exits. Callers can use this to detect session termination.
 func (s *Session) SessionDone() <-chan struct{} {
-	return s.runDone
+	s.runMu.Lock()
+	done := s.runDone
+	s.runMu.Unlock()
+	return done
+}
+
+// ShutdownCause returns the first error that terminated the session, the
+// goroutine source that detected it, and the time it was recorded. Returns
+// nil, "", time.Time{} if the session has not terminated or was stopped
+// without a real error (e.g., explicit Stop / context cancellation).
+func (s *Session) ShutdownCause() (source string, at time.Time, err error) {
+	cause := s.shutdownCause.Load()
+	if cause == nil {
+		return "", time.Time{}, nil
+	}
+	return cause.source, cause.at, cause.err
 }
 
 // SetPingInterval configures the keep-alive ping interval. Must be called
@@ -493,20 +340,41 @@ func (s *Session) SetPingInterval(d time.Duration) {
 	s.mu.Unlock()
 }
 
-// SetPongTimeout configures how long to wait for a pong before considering the
-// connection dead. Must be called before Connect/Start.
+// SetPongTimeout configures the minimum time to wait for a pong before
+// considering the connection dead. RTT variation may extend the timeout.
+// Must be called before Connect/Start.
 func (s *Session) SetPongTimeout(d time.Duration) {
 	s.mu.Lock()
 	s.pongTimeout = d
 	s.mu.Unlock()
 }
 
-func (s *Session) SetSaltRefreshRatio(r float64) {
-	s.saltMgr.SetRefreshRatio(r)
+// SetOnRTT registers a lightweight callback for ping RTT updates. The callback
+// runs in the ping goroutine and must not block.
+func (s *Session) SetOnRTT(fn func(rtt, variation time.Duration)) {
+	s.mu.Lock()
+	s.onRTT = fn
+	s.mu.Unlock()
 }
 
-func (s *Session) SetSaltRefreshMin(d time.Duration) {
-	s.saltMgr.SetRefreshMin(d)
+// SessionHealthSnapshot is a lock-free view of keepalive health.
+type SessionHealthSnapshot struct {
+	RTT       time.Duration
+	Variation time.Duration
+	LastPong  time.Time
+}
+
+// HealthSnapshot returns the current smoothed ping RTT and last pong time.
+func (s *Session) HealthSnapshot() SessionHealthSnapshot {
+	lastPong := s.lastPong.Load()
+	snapshot := SessionHealthSnapshot{
+		RTT:       time.Duration(s.rttEWMA.Load()),
+		Variation: time.Duration(s.rttVariance.Load()),
+	}
+	if lastPong > 0 {
+		snapshot.LastPong = time.Unix(0, lastPong)
+	}
+	return snapshot
 }
 
 func (s *Session) SetLogger(l sessionLogger) {
@@ -519,23 +387,82 @@ func (s *Session) SetLogger(l sessionLogger) {
 }
 
 func (s *Session) SetWriteBreakerThreshold(n int) {
-	s.writeBreakerThreshold = n
+	s.writeBreakerThreshold.Store(int32(n))
 }
 
+// ResetWriteBreaker clears the write circuit breaker, resetting the failure
+// counter and re-enabling writes. Safe to call from any goroutine.
+// Call after session reconnection or when the transport is known-good.
+func (s *Session) ResetWriteBreaker() {
+	s.consecWriteFailures.Store(0)
+	s.writeBreakerOpen.Store(false)
+}
+
+// recordShutdownCause stores the first terminating error for diagnostic
+// access and logs it exactly once. Uses atomic CompareAndSwap to guarantee
+// first-error-wins: subsequent calls from cascading goroutine exits are
+// silent no-ops.
+func (s *Session) recordShutdownCause(err error, source string) {
+	if err == nil {
+		return
+	}
+	cause := &sessionShutdownCause{err: err, source: source, at: time.Now()}
+	if !s.shutdownCause.CompareAndSwap(nil, cause) {
+		return
+	}
+	if s.log != nil {
+		age := ""
+		if at := s.connectedAt.Load(); at != nil {
+			age = " age=" + time.Since(*at).Truncate(time.Second).String()
+		}
+		s.log.Errorf("session: shutdown cause: source=%s dc=%d session_id=%d%s: %v",
+			source, s.dc.ID, s.sessionID, age, err)
+	}
+}
+
+// wrapGoroutine wraps an errgroup goroutine function so that the first real
+// (non-context) error it returns is recorded as the session's shutdown cause.
+// context.Canceled and context.DeadlineExceeded are filtered because they are
+// reactive exits caused by another goroutine's failure, not the root cause.
+func (s *Session) wrapGoroutine(name string, f func(context.Context) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		err := f(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			s.recordShutdownCause(err, name)
+		}
+		return err
+	}
+}
+
+// trackWriteResult updates the write circuit breaker. After threshold
+// consecutive failures the breaker opens and the errgroup is cancelled to
+// trigger immediate session shutdown + reconnect (fail-fast). Successful
+// writes reset both counter and breaker flag.
 func (s *Session) trackWriteResult(err error) {
-	if s.writeBreakerThreshold <= 0 {
+	threshold := int(s.writeBreakerThreshold.Load())
+	if threshold <= 0 {
 		return
 	}
 	if err != nil {
-		s.consecWriteFailures++
-		if s.consecWriteFailures >= s.writeBreakerThreshold && !s.writeBreakerOpen.Load() {
+		newCount := s.consecWriteFailures.Add(1)
+		if int(newCount) >= threshold && !s.writeBreakerOpen.Load() {
 			s.writeBreakerOpen.Store(true)
+			s.recordShutdownCause(fmt.Errorf("write circuit breaker: %d consecutive write failures", newCount), "writeBreaker")
+			if s.log != nil {
+				s.log.Errorf("session: write circuit breaker tripped after %d consecutive failures, forcing reconnect", newCount)
+			}
+			// Fail-fast: cancel the errgroup to trigger immediate session
+			// shutdown + reconnect via handleClose, rather than lingering
+			// until the read deadline expires (~60-120s).
 			if s.group != nil {
 				s.group.Cancel()
 			}
 		}
 	} else {
-		s.consecWriteFailures = 0
+		s.consecWriteFailures.Store(0)
+		if s.writeBreakerOpen.Load() {
+			s.writeBreakerOpen.Store(false)
+		}
 	}
 }
 
@@ -595,15 +522,25 @@ func NewSession(dc DataCenter, st storage.Storage, deviceModel, appVersion, syst
 		}),
 		pending:          NewPendingManager(),
 		containerTracker: NewContainerTracker(),
-		floodWaits:       &FloodWaitQueue{},
 		pingInterval:     60 * time.Second,
 		pongTimeout:      30 * time.Second,
 		updateSem:        make(chan struct{}, 128),
+		dispatchSem:      make(chan struct{}, 64),
 		saltMgr:          newSaltManager(time.Now),
 		sm:               newStateMachine(),
-
-		writeBreakerThreshold: 3,
+		chains:           make(map[int64]int64),
 	}
+
+	s.writeBreakerThreshold.Store(10)
+
+	// Server salt validity windows (validSince/validUntil) are server
+	// timestamps. Compare them against server-adjusted time, not wall
+	// clock, so clock skew doesn't cause premature or delayed salt
+	// rotation.
+	s.saltMgr.SetNowFunc(func() time.Time {
+		offset := time.Duration(s.msgFactory.ServerTimeOffset()) * time.Second
+		return time.Now().Add(offset)
+	})
 
 	if len(authKey) > 0 {
 		s.authKeyID = computeAuthKeyID(authKey)
@@ -619,12 +556,12 @@ func (s *Session) SetDispatchConfig(_, _ int) {}
 func (s *Session) addAck(msgID int64) {
 	select {
 	case s.ackCh <- msgID:
-	default:
+	case <-s.done:
 	}
 }
 
-func (s *Session) sendQuickAck(msgID int64) {
-	s.sendServiceMessage(&tg.MsgsAck{MsgIds: []int64{msgID}})
+func requiresAck(seqNo uint32) bool {
+	return seqNo&1 != 0
 }
 
 func (s *Session) TrackContainer(containerMsgID int64, childMsgIDs []int64) {
@@ -638,6 +575,7 @@ func (s *Session) SetOnDisconnect(func(error)) {}
 // SetAuthKey replaces the current authorization key and recomputes its ID.
 // Passing an empty slice clears the key and its ID.
 func (s *Session) SetAuthKey(key []byte) {
+	key = bytes.Clone(key)
 	s.mu.Lock()
 	s.authKey = key
 	if len(key) > 0 {
@@ -652,6 +590,7 @@ func (s *Session) SetAuthKey(key []byte) {
 // from the permanent key to the temporary key after binding succeeds.
 // The caller must ensure no in-flight messages depend on the old key.
 func (s *Session) SwapAuthKey(newKey []byte) {
+	newKey = bytes.Clone(newKey)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authKey = newKey
@@ -670,6 +609,57 @@ func (s *Session) SetPFS(mgr *TempKeyManager) {
 	s.mu.Lock()
 	s.pfs = mgr
 	s.mu.Unlock()
+}
+
+// SetPFSInitConnection sets the callback used to rewrite client metadata after
+// a live temporary-key rebind.
+func (s *Session) SetPFSInitConnection(fn func(context.Context) error) {
+	s.mu.Lock()
+	s.pfsInit = fn
+	s.mu.Unlock()
+}
+
+func (s *Session) recoverPFSBinding(ctx context.Context, pfs *TempKeyManager, observedEpoch uint64) (retErr error) {
+	s.pfsRecoveryMu.Lock()
+	defer s.pfsRecoveryMu.Unlock()
+
+	recoveryCtx := context.WithValue(ctx, pfsRecoveryContextKey{}, true)
+	s.pfsWriteMu.Lock()
+	recoveryFailed := true
+	defer func() {
+		if recoveryFailed {
+			s.stopping.Store(true)
+			s.recordShutdownCause(retErr, "pfsRecovery")
+		}
+		s.pfsWriteMu.Unlock()
+		if recoveryFailed {
+			s.RequestStop()
+		}
+	}()
+
+	_, retErr = pfs.Rebind(recoveryCtx, s.sessionID, observedEpoch,
+		func(ctx context.Context, query tg.TLObject) (tg.TLObject, error) {
+			return s.Invoke(ctx, query, defaultInvokeRetries, invokeTimeout(ctx))
+		})
+	if retErr != nil {
+		return retErr
+	}
+	if !pfs.NeedsInitConnection() {
+		recoveryFailed = false
+		return nil
+	}
+	s.mu.RLock()
+	initConnection := s.pfsInit
+	s.mu.RUnlock()
+	if initConnection == nil {
+		return errors.New("session: PFS rebind requires initConnection callback")
+	}
+	if err := initConnection(recoveryCtx); err != nil {
+		return fmt.Errorf("session: PFS initConnection after rebind: %w", err)
+	}
+	pfs.MarkInitConnectionDone()
+	recoveryFailed = false
+	return nil
 }
 
 // SetServerSalt updates the server salt used for encrypting outgoing messages.
@@ -720,13 +710,55 @@ func (s *Session) IsConnected() bool {
 // SetTransport replaces the underlying transport used for sending and
 // receiving encrypted payloads.
 func (s *Session) SetTransport(t Transport) {
+	s.attachTransport(t)
+}
+
+func (s *Session) attachTransport(t Transport) bool {
+	s.transportCloseMu.Lock()
+	defer s.transportCloseMu.Unlock()
 	s.mu.Lock()
+	if s.stopping.Load() {
+		s.mu.Unlock()
+		if t != nil {
+			_ = t.Close()
+		}
+		return false
+	}
 	s.transport = t
 	s.mu.Unlock()
+	return true
+}
+
+func (s *Session) closeTransport() {
+	s.transportCloseMu.Lock()
+	defer s.transportCloseMu.Unlock()
+	s.mu.Lock()
+	tp := s.transport
+	s.transport = nil
+	s.mu.Unlock()
+	if tp != nil {
+		_ = tp.Close()
+	}
 }
 
 func (s *Session) sessionIDBytes() []byte {
 	return s.sidBytes[:]
+}
+
+// packAndWrite registers a pending handle for msgID, stores the encrypted
+// payload for msg_resend_req re-transmission, and writes it to the transport.
+// On write failure the handle is cancelled. Shared by [Send] and [SendRaw].
+func (s *Session) packAndWrite(ctx context.Context, msgID int64, encrypted []byte, isRaw bool, timeout time.Duration) (*CallHandle, error) {
+	handle, err := s.pending.Register(msgID, isRaw)
+	if err != nil {
+		return nil, err
+	}
+	handle.StorePayload(encrypted)
+	if err := s.writeEncrypted(ctx, encrypted, timeout); err != nil {
+		s.pending.Cancel(msgID)
+		return nil, deliveryFailure(handle, err)
+	}
+	return handle, nil
 }
 
 // Send encrypts and sends a TLObject as a single MTProto message, then waits
@@ -742,6 +774,7 @@ func (s *Session) Send(ctx context.Context, msgID int64, seqNo uint32, body tg.T
 	authKey := s.authKey
 	authKeyID := s.authKeyID
 	transport := s.transport
+	b := s.outboundBatcher
 	s.mu.RUnlock()
 	if len(authKey) == 0 {
 		return nil, ErrAuthKeyNotSet
@@ -750,11 +783,11 @@ func (s *Session) Send(ctx context.Context, msgID int64, seqNo uint32, body tg.T
 		return nil, ErrTransportNotSet
 	}
 
-	// When the outbound batcher is enabled, delegate packing+writing to it.
-	// The batcher coalesces multiple concurrent RPCs into a msg_container.
-	if b := s.outboundBatcher; b != nil {
-		priority := RoutePriority(body)
-		handle, err := b.Submit(ctx, msgID, seqNo, body, priority, timeout)
+	// When the outbound batcher is enabled, delegate low-priority bulk work to
+	// it. High-priority interactive RPCs write directly to avoid the coalescing
+	// window.
+	if b != nil && RoutePriority(body) == PriorityLow {
+		handle, err := b.Submit(ctx, msgID, seqNo, body, PriorityLow, timeout)
 		if err != nil {
 			return nil, fmt.Errorf("session: send (batched): %w", err)
 		}
@@ -777,13 +810,8 @@ func (s *Session) Send(ctx context.Context, msgID int64, seqNo uint32, body tg.T
 		return nil, fmt.Errorf("session: pack message: %w", err)
 	}
 
-	handle, regErr := s.pending.Register(msgID, false)
-	if regErr != nil {
-		return nil, fmt.Errorf("session: send: %w", regErr)
-	}
-
-	if err := s.writeEncrypted(ctx, encrypted, timeout); err != nil {
-		s.pending.Cancel(msgID)
+	handle, err := s.packAndWrite(ctx, msgID, encrypted, false, timeout)
+	if err != nil {
 		return nil, fmt.Errorf("session: send: %w", err)
 	}
 
@@ -799,7 +827,7 @@ func (s *Session) waitResponse(ctx context.Context, handle *CallHandle, msgID in
 	select {
 	case <-handle.Done():
 		obj, _, err := handle.Result()
-		return obj, err
+		return obj, deliveryFailure(handle, err)
 	case <-ctx.Done():
 		s.pending.Cancel(msgID)
 		s.sendRPCDrop(msgID)
@@ -808,11 +836,49 @@ func (s *Session) waitResponse(ctx context.Context, handle *CallHandle, msgID in
 		s.pending.Reject(msgID, ErrSessionClosed)
 		<-handle.Done()
 		obj, _, err := handle.Result()
-		return obj, err
+		return obj, deliveryFailure(handle, err)
 	case <-respTimer.C:
 		s.pending.Cancel(msgID)
-		return nil, ErrSendTimeout
+		return nil, deliveryFailure(handle, ErrSendTimeout)
 	}
+}
+
+// waitResponseRaw is the raw-result variant of [waitResponse]. It returns the
+// raw rpc_result payload bytes without TL decoding.
+func (s *Session) waitResponseRaw(ctx context.Context, handle *CallHandle, msgID int64, timeout time.Duration) ([]byte, error) {
+	respTimer := time.NewTimer(timeout)
+	defer respTimer.Stop()
+	select {
+	case <-handle.Done():
+		_, raw, err := handle.Result()
+		return raw, deliveryFailure(handle, err)
+	case <-ctx.Done():
+		s.pending.Cancel(msgID)
+		return nil, ctx.Err()
+	case <-s.done:
+		s.pending.Reject(msgID, ErrSessionClosed)
+		<-handle.Done()
+		_, raw, err := handle.Result()
+		return raw, deliveryFailure(handle, err)
+	case <-respTimer.C:
+		s.pending.Cancel(msgID)
+		return nil, deliveryFailure(handle, ErrSendTimeout)
+	}
+}
+
+func deliveryFailure(handle *CallHandle, err error) error {
+	if err == nil || errors.Is(err, ErrMsgNotReceived) || errors.Is(err, ErrRPCDropped) {
+		return err
+	}
+	var deliveryErr *DeliveryError
+	if errors.As(err, &deliveryErr) {
+		return err
+	}
+	state := DeliveryUnknown
+	if handle != nil && handle.IsAcked() {
+		state = DeliveryReceived
+	}
+	return &DeliveryError{State: state, Err: err}
 }
 
 func (s *Session) sendRPCDrop(reqMsgID int64) {
@@ -837,12 +903,16 @@ func (s *Session) sendRPCDrop(reqMsgID int64) {
 	if err != nil {
 		return
 	}
-	_ = s.writeEncryptedDirect(encrypted, 5*time.Second)
+	// Dropping a canceled RPC is best-effort. Never delay cancellation behind
+	// live PFS recovery, which exclusively gates writes while rebinding the key.
+	if !s.pfsWriteMu.TryRLock() {
+		return
+	}
+	defer s.pfsWriteMu.RUnlock()
+	_ = s.writeEncryptedImpl(time.Now().Add(5*time.Second), encrypted)
 }
 
 func (s *Session) handlePacket(msgID int64, seqNo uint32, body tg.TLObject) {
-	s.addAck(msgID)
-
 	obj := body
 	if gz, ok := body.(*tg.GzipPacked); ok {
 		decoded, err := gz.Decode()
@@ -869,6 +939,7 @@ func (s *Session) handlePacket(msgID int64, seqNo uint32, body tg.TLObject) {
 		}
 	case *tg.NewSessionCreated:
 		s.saltMgr.StoreSimple(v.ServerSalt)
+		s.fireNewSession(v.FirstMsgID, v.UniqueID, v.ServerSalt)
 	case *tg.FutureSalts:
 		s.storeFutureSalts(v)
 	case *tg.MsgsAck:
@@ -890,7 +961,6 @@ func (s *Session) handlePacket(msgID int64, seqNo uint32, body tg.TLObject) {
 		}
 		s.pending.Resolve(v.ReqMsgID, result)
 	case tg.UpdatesClass:
-		s.sendQuickAck(msgID)
 		s.mu.RLock()
 		fn := s.onUpdate
 		s.mu.RUnlock()
@@ -912,31 +982,38 @@ func (s *Session) handlePacket(msgID int64, seqNo uint32, body tg.TLObject) {
 }
 
 // dispatchUpdate spawns a goroutine to deliver an update to the handler,
-// bounded by the updateSem semaphore. If 128 dispatches are already in
-// flight, the update is dropped.
+// bounded by the updateSem semaphore. Saturation applies backpressure to the
+// receive loop so an acknowledged update is never silently dropped.
 func (s *Session) dispatchUpdate(obj tg.TLObject) {
 	s.mu.RLock()
 	handlerFn := s.onUpdate
 	panicFn := s.onPanic
 	s.mu.RUnlock()
+	if handlerFn == nil {
+		return
+	}
 	select {
 	case s.updateSem <- struct{}{}:
-		go func() {
-			defer func() { <-s.updateSem }()
-			defer func() {
-				if r := recover(); r != nil {
-					if panicFn != nil {
-						panicFn(r)
-					} else {
-						if s.log != nil {
-							s.log.Errorf("dispatchUpdate panic: %v", r)
-						}
-					}
-				}
-			}()
-			handlerFn(obj)
-		}()
-	default:
+	case <-s.done:
+		return
+	}
+	go func() {
+		defer func() { <-s.updateSem }()
+		defer s.recoverPanic("dispatchUpdate", panicFn)
+		handlerFn(obj)
+	}()
+}
+
+// recoverPanic catches panics from a dispatch goroutine, routes them to the
+// session's onPanic callback, and falls back to logging. Shared by
+// dispatchUpdate and dispatchRaw.
+func (s *Session) recoverPanic(name string, panicFn func(any)) {
+	if r := recover(); r != nil {
+		if panicFn != nil {
+			panicFn(r)
+		} else if s.log != nil {
+			s.log.Errorf("%s panic: %v", name, r)
+		}
 	}
 }
 
@@ -970,49 +1047,40 @@ func (s *Session) SendRaw(ctx context.Context, msgID int64, seqNo uint32, bodyBy
 		return nil, fmt.Errorf("session: send raw: %w", err)
 	}
 
-	handle, regErr := s.pending.Register(msgID, true)
-	if regErr != nil {
-		return nil, fmt.Errorf("session: send raw: %w", regErr)
-	}
-
-	if err := s.writeEncrypted(ctx, encrypted, timeout); err != nil {
-		s.pending.Cancel(msgID)
+	handle, err := s.packAndWrite(ctx, msgID, encrypted, true, timeout)
+	if err != nil {
 		return nil, fmt.Errorf("session: send raw: %w", err)
 	}
 
-	respTimer := time.NewTimer(timeout)
-	defer respTimer.Stop()
-	select {
-	case <-handle.Done():
-		_, raw, err := handle.Result()
-		return raw, err
-	case <-ctx.Done():
-		s.pending.Cancel(msgID)
-		s.sendRPCDrop(msgID)
-		return nil, ctx.Err()
-	case <-s.done:
-		s.pending.Reject(msgID, ErrSessionClosed)
-		<-handle.Done()
-		_, raw, err := handle.Result()
-		return raw, err
-	case <-respTimer.C:
-		s.pending.Cancel(msgID)
-		return nil, ErrSendTimeout
-	}
+	return s.waitResponseRaw(ctx, handle, msgID, timeout)
 }
 
 // InvokeRaw sends a TLObject query and returns the matching rpc_result's raw
 // result:Object payload bytes without gzip unpacking or TL decoding. It retries
 // the request up to retries times with the given per-attempt timeout.
 func (s *Session) InvokeRaw(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := query.Encode(&buf); err != nil {
-		return nil, fmt.Errorf("session: invoke raw: encode query: %w", err)
+	buf := encodeBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	if err := query.Encode(buf); err != nil {
+		encodeBufPool.Put(buf)
+		return nil, fmt.Errorf("encode query: %w", err)
 	}
-	bodyBytes := buf.Bytes()
+	bodyBytes := make([]byte, buf.Len())
+	copy(bodyBytes, buf.Bytes())
+	encodeBufPool.Put(buf)
 
 	var lastErr error
+	var backoff time.Duration
 	for i := 0; i < retries; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-s.done:
+				return nil, ErrSessionClosed
+			case <-time.After(backoff):
+			}
+		}
 		msgID := s.msgFactory.AllocateMsgID()
 		seqNo := s.msgFactory.AllocateSeqNo(true)
 
@@ -1021,12 +1089,24 @@ func (s *Session) InvokeRaw(ctx context.Context, query tg.TLObject, retries int,
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			lastErr = fmt.Errorf("invoke raw: send: %w", err)
+			lastErr = fmt.Errorf("send: %w", err)
+			var deliveryErr *DeliveryError
+			if errors.As(err, &deliveryErr) {
+				return nil, lastErr
+			}
+			if backoff == 0 {
+				backoff = 100 * time.Millisecond
+			} else {
+				backoff = backoff * 2
+				if backoff > 2*time.Second {
+					backoff = 2 * time.Second
+				}
+			}
 			continue
 		}
 
 		if len(data) < 4 {
-			lastErr = fmt.Errorf("invoke raw: rpc result too short: %d", len(data))
+			lastErr = fmt.Errorf("rpc result too short: %d", len(data))
 			continue
 		}
 
@@ -1037,27 +1117,55 @@ func (s *Session) InvokeRaw(ctx context.Context, query tg.TLObject, retries int,
 		return data, nil
 	}
 	if lastErr == nil {
-		return nil, fmt.Errorf("session: invoke raw: retries exhausted (%d)", retries)
+		return nil, fmt.Errorf("retries exhausted (%d)", retries)
 	}
-	return nil, fmt.Errorf("session: invoke raw: retries exhausted (%d): %w", retries, lastErr)
+	return nil, fmt.Errorf("retries exhausted (%d): %w", retries, lastErr)
 }
 
 func checkRawRPCError(data []byte) error {
+	return checkRawRPCErrorDepth(data, 0)
+}
+
+func checkRawRPCErrorDepth(data []byte, depth int) error {
 	if len(data) < 4 {
 		return nil
 	}
 	constructorID := binary.LittleEndian.Uint32(data[:4])
-	if constructorID != tg.RPCErrorTypeID {
+	switch constructorID {
+	case tg.RPCErrorTypeID:
+		r := tg.NewReader(data[4:])
+		defer tg.ReleaseReader(r)
+		rpcErr, err := tg.DecodeRPCError(r)
+		if err != nil {
+			return fmt.Errorf("decode raw rpc error: %w", err)
+		}
+		return tgerr.New(int(rpcErr.ErrorCode), rpcErr.ErrorMessage)
+	case tg.GzipPackedID:
+		if depth >= 4 {
+			return fmt.Errorf("decode raw rpc error: gzip nesting exceeds 4 levels")
+		}
+		innerConstructor, err := tg.PeekGzipPackedConstructor(data[4:])
+		if err != nil {
+			return fmt.Errorf("decode raw gzip payload: %w", err)
+		}
+		if innerConstructor != tg.RPCErrorTypeID && innerConstructor != tg.GzipPackedID {
+			return nil
+		}
+
+		r := tg.NewReader(data[4:])
+		gz, err := tg.DecodeGzipPacked(r)
+		tg.ReleaseReader(r)
+		if err != nil {
+			return fmt.Errorf("decode raw gzip payload: %w", err)
+		}
+		payload, ok := gz.Data.(*tg.GzipPackedData)
+		if !ok {
+			return fmt.Errorf("decode raw gzip payload: unexpected payload type %T", gz.Data)
+		}
+		return checkRawRPCErrorDepth(payload.Raw, depth+1)
+	default:
 		return nil
 	}
-	r := tg.NewReader(data[4:])
-	defer tg.ReleaseReader(r)
-	rpcErr, err := tg.DecodeRPCError(r)
-	if err != nil {
-		return nil
-	}
-	parsed := tgerr.New(int(rpcErr.ErrorCode), rpcErr.ErrorMessage)
-	return fmt.Errorf("invoke raw: %w", parsed)
 }
 
 // Invoke sends an RPC query and decodes the response into a TLObject.
@@ -1065,25 +1173,58 @@ func checkRawRPCError(data []byte) error {
 // timeout. Returns the decoded response object or the last error encountered.
 func (s *Session) Invoke(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error) {
 	methodName := typeName(query)
+	boundQuery, messageIDBound := query.(messageIDBoundQuery)
+	_, bindingTempKey := unwrapSessionRPCQuery(query).(*tg.AuthBindTempAuthKeyRequest)
+	bindingTempKey = bindingTempKey || messageIDBound
+	pfs := s.PFS()
+	var pfsBindEpoch uint64
+	if pfs != nil {
+		pfsBindEpoch = pfs.BindEpoch()
+	}
+	chainID, hasChain := ChainIDFromContext(ctx) // G13: invokeAfterMsg chain
+	if bindingTempKey {
+		hasChain = false
+	}
 
 	var lastErr error
 	var backoff time.Duration
 	maxAttempts := retries
-	totalWait := time.Duration(0) // accumulated FLOOD_WAIT sleep, bounded by maxFloodWaitBudget
 	badSaltRetries := 0
+	g12Retries := 0 // G12: bound additional error-recovery retries
 	for i := 0; i < maxAttempts; i++ {
 		if i > 0 {
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-s.done:
+				return nil, ErrSessionClosed
+			case <-time.After(backoff):
+			}
 		}
 		msgID := s.msgFactory.AllocateMsgID()
 		seqNo := s.msgFactory.AllocateSeqNo(true)
 
-		obj, err := s.Send(ctx, msgID, uint32(seqNo), query, timeout)
+		sendQuery := query
+		if messageIDBound {
+			var err error
+			sendQuery, err = boundQuery.prepareForMessageID(msgID)
+			if err != nil {
+				return nil, fmt.Errorf("prepare %s: %w", methodName, err)
+			}
+		}
+		if hasChain {
+			sendQuery = s.wrapChain(chainID, query)
+		}
+		obj, err := s.Send(ctx, msgID, uint32(seqNo), sendQuery, timeout)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			lastErr = fmt.Errorf("invoke %s: send: %w", methodName, err)
+			lastErr = fmt.Errorf("send: %w", err)
+			var deliveryErr *DeliveryError
+			if errors.As(err, &deliveryErr) {
+				return nil, lastErr
+			}
 			if backoff == 0 {
 				backoff = 100 * time.Millisecond
 			} else {
@@ -1098,15 +1239,15 @@ func (s *Session) Invoke(ctx context.Context, query tg.TLObject, retries int, ti
 		if bad, ok := obj.(tg.BadMsgNotificationClass); ok {
 			switch v := bad.(type) {
 			case *tg.BadMsgNotification:
-				lastErr = fmt.Errorf("invoke %s: bad message (msg_id=%d, code=%d)", methodName, msgID, v.ErrorCode)
+				lastErr = fmt.Errorf("bad message (msg_id=%d, code=%d)", msgID, v.ErrorCode)
 			case *tg.BadServerSalt:
-				lastErr = fmt.Errorf("invoke %s: bad server salt (msg_id=%d, code=%d)", methodName, msgID, v.ErrorCode)
+				lastErr = fmt.Errorf("bad server salt (msg_id=%d, code=%d)", msgID, v.ErrorCode)
 				if badSaltRetries == 0 && i+1 >= maxAttempts {
 					badSaltRetries++
 					maxAttempts++
 				}
 			default:
-				lastErr = fmt.Errorf("invoke %s: bad message notification: %T", methodName, bad)
+				lastErr = fmt.Errorf("bad message notification: %T", bad)
 			}
 			if backoff == 0 {
 				backoff = 100 * time.Millisecond
@@ -1124,45 +1265,85 @@ func (s *Session) Invoke(ctx context.Context, query tg.TLObject, retries int, ti
 				return obj, nil
 			}
 			parsed := tgerr.New(int(rpcErr.ErrorCode), rpcErr.ErrorMessage)
-			if wait, ok := parseFloodWait(rpcErr.ErrorMessage); ok {
-				// Bound total flood-wait time; beyond the budget, surface a synthetic
-				// 429 (Too Many Requests: retry after N) like the reference
-				// NetQueryDelayer, instead of blocking the caller indefinitely.
-				if totalWait+wait > maxFloodWaitBudget {
-					seconds := int(wait.Seconds())
-					if seconds < 1 {
-						seconds = 1
-					}
-					return nil, fmt.Errorf("invoke %s: %w", methodName, tgerr.New(429, fmt.Sprintf("FLOOD_WAIT_%d", seconds)))
-				}
-				msgID := s.msgFactory.AllocateMsgID()
-				s.floodWaits.Delay(query, msgID, wait)
+			if tgerr.Is(parsed, tgerr.ErrAuthKeyDuplicated) {
+				return nil, parsed
+			}
+			if rpcErr.ErrorCode == 420 {
+				return obj, nil
+			}
+			// G13: MSG_WAIT_FAILED — the referenced msg in an invokeAfterMsg
+			// chain failed. Clear the chain dependency and resend unwrapped
+			// so the query is not permanently blocked.
+			if hasChain && tgerr.Is(parsed, tgerr.ErrMSGWaitFailed) {
+				s.ClearChain(chainID)
 				if s.log != nil {
-					s.log.Warnf("flood wait detected method=%s duration=%v", methodName, wait)
-					s.log.Warnf("flood wait delayed method=%s msg_id=%d duration=%v", methodName, msgID, wait)
+					s.log.Warnf("chain msg wait failed method=%s chain_id=%d, retrying unwrapped", methodName, chainID)
+				}
+				lastErr = fmt.Errorf("chain msg wait failed")
+				backoff = 100 * time.Millisecond
+				maxAttempts++
+				continue
+			}
+
+			// G12: CONNECTION_NOT_INITED (400) — the server lost track of the
+			// connection init state. Retry; the caller (client layer) wraps in
+			// initConnection which re-establishes server-side state.
+			if g12Retries < maxG12Retries && tgerr.Is(parsed, tgerr.ErrConnectionNotInited) {
+				g12Retries++
+				if s.log != nil {
+					s.log.Warnf("connection not inited method=%s attempt=%d", methodName, i+1)
+				}
+				lastErr = fmt.Errorf("connection not inited")
+				backoff = 100 * time.Millisecond
+				maxAttempts++
+				continue
+			}
+
+			// G12: PERSISTENT_TIMESTAMP_OUTDATED (400) — transient server-side
+			// state issue. Brief delay then retry.
+			if g12Retries < maxG12Retries && tgerr.Is(parsed, tgerr.ErrPersistentTimestampOutdated) {
+				g12Retries++
+				if s.log != nil {
+					s.log.Warnf("persistent timestamp outdated method=%s attempt=%d", methodName, i+1)
 				}
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				case <-s.done:
-					if s.log != nil {
-						s.log.Warnf("flood wait rejected method=%s msg_id=%d err=%v", methodName, msgID, ErrSessionClosed)
-					}
 					return nil, ErrSessionClosed
-				case <-time.After(wait):
+				case <-time.After(1 * time.Second):
 				}
-				s.floodWaits.Ready()
-				if s.log != nil {
-					s.log.Warnf("flood wait retry method=%s msg_id=%d duration=%v", methodName, msgID, wait)
-				}
-				totalWait += wait
+				lastErr = fmt.Errorf("persistent timestamp outdated")
+				backoff = 0
 				maxAttempts++
 				continue
 			}
-			if rpcErr.ErrorCode == 401 || rpcErr.ErrorCode == 400 || rpcErr.ErrorCode == 403 {
-				return nil, fmt.Errorf("invoke %s: %w", methodName, parsed)
+
+			// G12: AUTH_KEY_PERM_EMPTY (401) — in PFS mode the temp key may
+			// have been invalidated. Re-bind and retry. Without PFS this error
+			// should not occur; surface it to the caller.
+			if !bindingTempKey && ctx.Value(pfsRecoveryContextKey{}) == nil && g12Retries < maxG12Retries && tgerr.Is(parsed, tgerr.ErrAuthKeyPermEmpty) {
+				g12Retries++
+				if pfs != nil && pfs.IsEnabled() {
+					if s.log != nil {
+						s.log.Warnf("auth key perm empty method=%s, rebinding temp key", methodName)
+					}
+					if err := s.recoverPFSBinding(ctx, pfs, pfsBindEpoch); err != nil {
+						return nil, fmt.Errorf("auth key perm empty: rebind failed: %w", err)
+					}
+					pfsBindEpoch = pfs.BindEpoch()
+					lastErr = fmt.Errorf("auth key perm empty, temp key rebound")
+					backoff = 0
+					maxAttempts++
+					continue
+				}
+				// Not PFS — fall through to the 401 surface below.
 			}
-			lastErr = fmt.Errorf("invoke %s: %w", methodName, parsed)
+
+			if rpcErr.ErrorCode == 401 || rpcErr.ErrorCode == 400 || rpcErr.ErrorCode == 403 {
+				return nil, parsed
+			}
+			lastErr = parsed
 			if backoff == 0 {
 				backoff = 100 * time.Millisecond
 			} else {
@@ -1174,32 +1355,91 @@ func (s *Session) Invoke(ctx context.Context, query tg.TLObject, retries int, ti
 			continue
 		}
 
+		if hasChain {
+			s.SetChain(msgID, chainID)
+		}
 		return obj, nil
 	}
 	if lastErr == nil {
-		return nil, fmt.Errorf("invoke %s: retries exhausted (%d)", methodName, retries)
+		return nil, fmt.Errorf("retries exhausted (%d)", retries)
 	}
-	return nil, fmt.Errorf("invoke %s: retries exhausted (%d): %w", methodName, retries, lastErr)
+	return nil, fmt.Errorf("retries exhausted (%d): %w", retries, lastErr)
 }
 
-// maxFloodWaitBudget bounds the total time Invoke blocks on FLOOD_WAIT sleeps
-// before surfacing a synthetic 429 (Too Many Requests: retry after N). Mirrors
-// TDLib NetQueryDelayer's total_timeout_limit_: short waits are retried within
-// the budget; a wait that would exceed it is surfaced as 429 so the Bot API
-// caller can honour retry_after instead of hanging.
-const maxFloodWaitBudget = 60 * time.Second
-
-func parseFloodWait(message string) (time.Duration, bool) {
-	const prefix = "FLOOD_WAIT_"
-	if !strings.HasPrefix(message, prefix) {
-		return 0, false
-	}
-	seconds, err := strconv.Atoi(strings.TrimPrefix(message, prefix))
-	if err != nil || seconds < 0 {
-		return 0, false
-	}
-	return time.Duration(seconds) * time.Second, true
+func unwrapSessionRPCQuery(query tg.TLObject) tg.TLObject {
+	return UnwrapRPCQuery(query)
 }
+
+// UnwrapRPCQuery peels back helper wrapper layers (InvokeWithLayer,
+// InitConnection, InvokeAfterMsg, etc.) to reach the inner user request.
+func UnwrapRPCQuery(query tg.TLObject) tg.TLObject {
+	for query != nil {
+		switch wrapped := query.(type) {
+		case *tg.InvokeWithLayerRequest:
+			query = wrapped.Query
+		case *tg.InitConnectionRequest:
+			query = wrapped.Query
+		case *tg.InvokeAfterMsgRequest:
+			query = wrapped.Query
+		case *tg.InvokeAfterMsgsRequest:
+			query = wrapped.Query
+		case *tg.InvokeWithoutUpdatesRequest:
+			query = wrapped.Query
+		case *tg.InvokeWithTakeoutRequest:
+			query = wrapped.Query
+		case *tg.InvokeWithBusinessConnectionRequest:
+			query = wrapped.Query
+		default:
+			return query
+		}
+	}
+	return nil
+}
+
+// DropRPC sends rpc_drop_answer for the given msg_id, asking the server to
+// cancel the in-flight RPC. After the server responds, the pending handle for
+// msgID is rejected with ErrRPCDropped so the original caller unblocks.
+//
+// This is a best-effort cancel — the server may have already processed the
+// request. The server's response indicates the outcome:
+//   - RPCAnswerUnknown: the server has no record of msgID (already gone).
+//   - RPCAnswerDroppedRunning: the RPC was running and the result was discarded.
+//   - RPCAnswerDropped: the RPC result was discarded.
+func (s *Session) DropRPC(ctx context.Context, msgID int64) error {
+	result, err := s.Invoke(ctx, &tg.RPCDropAnswerRequest{ReqMsgID: msgID}, 1, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	// Reject the pending handle so the original caller unblocks with a typed
+	// error. If the handle already completed (server raced ahead), Reject is
+	// a no-op.
+	s.pending.Reject(msgID, ErrRPCDropped)
+	if _, ok := result.(tg.RPCDropAnswerClass); !ok {
+		return fmt.Errorf("session: drop rpc: unexpected result type %T", result)
+	}
+	return nil
+}
+
+// defaultInvokeRetries is the default retry count used when the session is
+// called without an explicit retry parameter (e.g., from the PFS rebind path).
+const defaultInvokeRetries = 3
+
+// invokeTimeout derives a per-attempt timeout from the context deadline.
+// Falls back to 60s when the context has no deadline.
+func invokeTimeout(ctx context.Context) time.Duration {
+	timeout := 60 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return timeout
+}
+
+// maxG12Retries bounds the number of G12 error-recovery retries (for
+// CONNECTION_NOT_INITED, PERSISTENT_TIMESTAMP_OUTDATED, AUTH_KEY_PERM_EMPTY)
+// before surfacing the error to the caller.
+const maxG12Retries = 2
 
 func typeName(v tg.TLObject) string {
 	if v == nil {
@@ -1238,28 +1478,62 @@ func (s *Session) runInitWithCtx(pingCtx, groupCtx context.Context) error {
 	s.ackCh = make(chan int64, 1024)
 	s.pingCbs = make(map[int64]chan struct{})
 	s.done = make(chan struct{})
-	s.consecWriteFailures = 0
+	s.stateReqs = make(map[int64]*pendingStateReq)
+	s.chains = make(map[int64]int64)
+	s.consecWriteFailures.Store(0)
 	s.writeBreakerOpen.Store(false)
-	s.sm.transition(StateIdle, StateConnecting)
+	s.connectedAt.Store(nil)
+	s.shutdownCause.Store(nil)
+	if !s.sm.transition(StateIdle, StateConnecting) {
+		state := s.sm.State()
+		if state == StateClosed {
+			return ErrSessionClosed
+		}
+		return fmt.Errorf("session: start: already connected (state=%s)", state)
+	}
 
 	// Start the errgroup so readLoop is running during the initial ping.
 	g := newErrGroup(groupCtx)
-	g.Go(s.readLoop)
-	g.Go(s.ackLoop)
+	g.Go(s.wrapGoroutine("readLoop", s.readLoop))
+	g.Go(s.wrapGoroutine("ackLoop", s.ackLoop))
 
 	s.group = g
 
 	initPingCtx, initPingCancel := context.WithTimeout(pingCtx, 60*time.Second)
-	_, err := s.Invoke(initPingCtx, &tg.PingRequest{PingID: time.Now().UnixNano()}, 3, timeoutFromContext(pingCtx))
+	stopGroupCancel := context.AfterFunc(groupCtx, initPingCancel)
+	_, err := s.Invoke(initPingCtx, &tg.PingRequest{PingID: time.Now().UnixNano()}, 3, invokeTimeout(pingCtx))
+	stopGroupCancel()
 	initPingCancel()
 	if err != nil {
+		s.recordShutdownCause(fmt.Errorf("initial ping: %w", err), "runInit")
 		g.Cancel()
-		s.sm.transition(StateConnecting, StateClosed)
 		close(s.done)
+		s.closeTransport()
+		_ = g.Wait()
+		s.sm.transition(StateConnecting, StateClosed)
 		return fmt.Errorf("session: initial ping: %w", err)
+	}
+	if httpTransport, ok := tp.(httpWaitTransport); ok {
+		maxDelay, waitAfter, maxWait, enabled := httpTransport.HTTPWaitParams()
+		if enabled {
+			httpTransport.StartHTTPWait(func(ctx context.Context) ([]byte, error) {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				default:
+				}
+				return s.buildServiceMessage(&tg.HTTPWait{
+					MaxDelay:  maxDelay,
+					WaitAfter: waitAfter,
+					MaxWait:   maxWait,
+				})
+			})
+		}
 	}
 
 	s.sm.transition(StateConnecting, StateActive)
+	now := time.Now()
+	s.connectedAt.Store(&now)
 
 	return nil
 }
@@ -1268,11 +1542,17 @@ func (s *Session) runInitWithCtx(pingCtx, groupCtx context.Context) error {
 // is cancelled or a goroutine returns a fatal error.
 func (s *Session) runLoop(ctx context.Context) error {
 	g := s.group
-	g.Go(s.pingLoop)
-	g.Go(s.saltLoop)
+	g.Go(s.wrapGoroutine("stateCheckLoop", s.stateCheckLoop))
+	g.Go(s.wrapGoroutine("pingLoop", s.pingLoop))
+	g.Go(s.wrapGoroutine("saltLoop", s.saltLoop))
 	g.Go(s.handleClose)
+	if pfs := s.PFS(); pfs != nil && pfs.IsEnabled() {
+		g.Go(s.wrapGoroutine("pfsRenewalLoop", s.pfsRenewalLoop))
+	}
 
 	err := g.Wait()
+	s.stopping.Store(true)
+	s.CloseOutboundBatching()
 	s.sm.transitionTo(StateClosed)
 	return err
 }
@@ -1282,16 +1562,20 @@ func (s *Session) runLoop(ctx context.Context) error {
 // (pingLoop, saltLoop, handleClose) and blocks until the context is cancelled
 // or a fatal error occurs.
 func (s *Session) Run(ctx context.Context) error {
+	s.lifecycleMu.Lock()
 	if !s.sm.canConnect() {
 		state := s.sm.State()
+		s.lifecycleMu.Unlock()
 		if state == StateClosed {
 			return ErrSessionClosed
 		}
 		return fmt.Errorf("session: run: already connected (state=%s)", state)
 	}
 	if err := s.runInit(ctx); err != nil {
+		s.lifecycleMu.Unlock()
 		return err
 	}
+	s.lifecycleMu.Unlock()
 	return s.runLoop(ctx)
 }
 
@@ -1312,6 +1596,15 @@ func (s *Session) Start(timeout time.Duration) error {
 // after the initial ping succeeds. The ctx bounds the startup ping. Use Stop
 // to terminate the background session.
 func (s *Session) StartContext(ctx context.Context) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return s.startContextLocked(ctx)
+}
+
+func (s *Session) startContextLocked(ctx context.Context) error {
+	if s.stopping.Load() {
+		return ErrSessionClosed
+	}
 	if !s.sm.canConnect() {
 		state := s.sm.State()
 		if state == StateClosed {
@@ -1320,40 +1613,62 @@ func (s *Session) StartContext(ctx context.Context) error {
 		return fmt.Errorf("session: start: already connected (state=%s)", state)
 	}
 	runCtx, runCancel := context.WithCancel(context.Background())
+	s.runMu.Lock()
+	if s.stopping.Load() {
+		s.runMu.Unlock()
+		runCancel()
+		return ErrSessionClosed
+	}
 	s.runCancel = runCancel
-	s.runDone = make(chan struct{})
+	runDone := make(chan struct{})
+	s.runDone = runDone
+	s.runMu.Unlock()
 
 	// Use the caller's context for ping timeout but runCtx for the errgroup
 	// so the goroutines survive after the caller's context expires.
 	if err := s.runInitWithCtx(ctx, runCtx); err != nil {
 		runCancel()
+		close(runDone)
 		return err
 	}
 	go func() {
-		defer close(s.runDone)
-		s.runLoop(runCtx)
+		defer close(runDone)
+		if err := s.runLoop(runCtx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			s.recordShutdownCause(err, "runLoop")
+		}
 	}()
 	return nil
 }
 
-// Stop cancels the background context and waits for the session to exit.
-func (s *Session) Stop() {
-	if s.runCancel != nil {
-		s.runCancel()
+// RequestStop cancels the background context without waiting for the session
+// goroutines to exit. It is safe to call from an update handler running on the
+// session itself; use Stop when synchronous shutdown is required.
+func (s *Session) RequestStop() <-chan struct{} {
+	s.stopping.Store(true)
+	s.runMu.Lock()
+	cancel := s.runCancel
+	done := s.runDone
+	if done == nil {
+		done = s.setupDone
 	}
-	if s.runDone != nil {
-		<-s.runDone
+	s.runMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
+	// Closing is the synchronous teardown boundary for both a running session
+	// and authentication before runCancel is published. Detach first so
+	// concurrent shutdown paths cannot close the same transport twice.
+	s.closeTransport()
+	s.CloseOutboundBatching()
+	return done
 }
 
-func timeoutFromContext(ctx context.Context) time.Duration {
-	if deadline, ok := ctx.Deadline(); ok {
-		timeout := time.Until(deadline)
-		if timeout > 0 {
-			return timeout
-		}
+// Stop cancels the background context and waits for the session to exit.
+func (s *Session) Stop() {
+	done := s.RequestStop()
+	if done != nil {
+		<-done
 	}
-	return 60 * time.Second
 }
 
 func (s *Session) ensureFreshSalt(ctx context.Context) int64 {
@@ -1367,9 +1682,7 @@ func (s *Session) ensureFreshSalt(ctx context.Context) int64 {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if s.saltMgr.WaitForValid(waitCtx) {
-		return s.saltMgr.Load()
-	}
+	_ = s.saltMgr.WaitForValid(waitCtx)
 	return s.saltMgr.Load()
 }
 
@@ -1380,28 +1693,88 @@ func (s *Session) storeFutureSalts(fs *tg.FutureSalts) {
 	s.saltMgr.StoreFromFutureSalts(saltEntriesFromFuture(fs.Salts))
 }
 
-func (s *Session) sendServiceMessage(body tg.TLObject) {
+func (s *Session) sendServiceMessage(body tg.TLObject) error {
 	select {
 	case <-s.done:
-		return
+		return ErrSessionClosed
 	default:
 	}
+	encrypted, err := s.buildServiceMessage(body)
+	if err != nil {
+		if s.log != nil {
+			s.log.Errorf("session: pack service message: %v", err)
+		}
+		return fmt.Errorf("session: pack service message: %w", err)
+	}
+	if err := s.writeEncryptedDirect(encrypted, 10*time.Second); err != nil {
+		if s.log != nil {
+			s.log.Warnf("session: service message write failed (%T): %v", body, err)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Session) buildServiceMessage(body tg.TLObject) ([]byte, error) {
 	s.mu.RLock()
 	authKey := s.authKey
 	authKeyID := s.authKeyID
 	s.mu.RUnlock()
-	msgID := s.msgFactory.AllocateMsgID()
-	seqNo := s.msgFactory.AllocateSeqNo(false)
 	message := &tg.MTProtoMessage{
-		MsgID: msgID,
-		SeqNo: uint32(seqNo),
+		MsgID: s.msgFactory.AllocateMsgID(),
+		SeqNo: uint32(s.msgFactory.AllocateSeqNo(false)),
 		Body:  body,
 	}
-	encrypted, err := crypto.Pack(message, s.saltMgr.Load(), s.sessionIDBytes(), authKey, authKeyID)
-	if err != nil {
-		return
+	return crypto.Pack(message, s.saltMgr.Load(), s.sessionIDBytes(), authKey, authKeyID)
+}
+
+// writeEncryptedImpl is the shared implementation for writeEncrypted and
+// writeEncryptedDirect. It snapshots transport state, acquires writeMux, sets
+// the write deadline, writes the encrypted payload, and releases the mutex.
+func (s *Session) writeEncryptedImpl(deadline time.Time, encrypted []byte) error {
+	if s.stopping.Load() {
+		return ErrSessionClosed
 	}
-	_ = s.writeEncryptedDirect(encrypted, 10*time.Second)
+	if s.writeBreakerThreshold.Load() > 0 && s.writeBreakerOpen.Load() {
+		return ErrWriteCircuitOpen
+	}
+
+	s.mu.RLock()
+	tp := s.transport
+	s.mu.RUnlock()
+	if tp == nil {
+		return ErrTransportNotSet
+	}
+
+	lockStart := time.Now()
+	s.writeMux.Lock()
+	if wait := time.Since(lockStart); wait > slowWriteThreshold && s.log != nil {
+		s.log.Warnf("session: slow write lock wait: %v", wait)
+	}
+	defer s.writeMux.Unlock()
+
+	if s.stopping.Load() {
+		return ErrSessionClosed
+	}
+	if s.writeBreakerThreshold.Load() > 0 && s.writeBreakerOpen.Load() {
+		return ErrWriteCircuitOpen
+	}
+
+	select {
+	case <-s.done:
+		return ErrSessionClosed
+	default:
+	}
+
+	tp.SetWriteDeadline(deadline)
+	writeStart := time.Now()
+	err := tp.Send(encrypted)
+	if elapsed := time.Since(writeStart); elapsed > slowWriteThreshold && s.log != nil {
+		s.log.Warnf("session: slow transport write: %v", elapsed)
+	}
+	tp.SetWriteDeadline(time.Time{})
+	s.trackWriteResult(err)
+	return err
 }
 
 // writeEncrypted snapshots transport state, acquires writeMux, sets the write
@@ -1409,76 +1782,22 @@ func (s *Session) sendServiceMessage(body tg.TLObject) {
 // payload, and releases the mutex. Returns the transport error, if any.
 // Lock ordering: mu is always acquired BEFORE writeMux, never inside it.
 func (s *Session) writeEncrypted(ctx context.Context, encrypted []byte, timeout time.Duration) error {
-	if s.writeBreakerThreshold > 0 && s.writeBreakerOpen.Load() {
-		return ErrWriteCircuitOpen
+	if ctx == nil || ctx.Value(pfsRecoveryContextKey{}) == nil {
+		s.pfsWriteMu.RLock()
+		defer s.pfsWriteMu.RUnlock()
 	}
-
 	deadline := time.Now().Add(timeout)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
 	}
-
-	s.mu.RLock()
-	tp := s.transport
-	s.mu.RUnlock()
-	if tp == nil {
-		return ErrTransportNotSet
-	}
-
-	s.writeMux.Lock()
-	defer s.writeMux.Unlock()
-
-	if s.writeBreakerThreshold > 0 && s.writeBreakerOpen.Load() {
-		return ErrWriteCircuitOpen
-	}
-
-	select {
-	case <-s.done:
-		return ErrSessionClosed
-	default:
-	}
-
-	tp.SetWriteDeadline(deadline)
-	err := tp.Send(encrypted)
-	tp.SetWriteDeadline(time.Time{})
-	s.trackWriteResult(err)
-	return err
+	return s.writeEncryptedImpl(deadline, encrypted)
 }
 
-// writeEncryptedDirect is the context-less variant used by service messages
-// and RPCDropAnswer where there is no caller context to respect.
+// writeEncryptedDirect is the context-less variant used by service messages.
 func (s *Session) writeEncryptedDirect(encrypted []byte, timeout time.Duration) error {
-	if s.writeBreakerThreshold > 0 && s.writeBreakerOpen.Load() {
-		return ErrWriteCircuitOpen
-	}
-
-	deadline := time.Now().Add(timeout)
-
-	s.mu.RLock()
-	tp := s.transport
-	s.mu.RUnlock()
-	if tp == nil {
-		return ErrTransportNotSet
-	}
-
-	s.writeMux.Lock()
-	defer s.writeMux.Unlock()
-
-	if s.writeBreakerThreshold > 0 && s.writeBreakerOpen.Load() {
-		return ErrWriteCircuitOpen
-	}
-
-	select {
-	case <-s.done:
-		return ErrSessionClosed
-	default:
-	}
-
-	tp.SetWriteDeadline(deadline)
-	err := tp.Send(encrypted)
-	tp.SetWriteDeadline(time.Time{})
-	s.trackWriteResult(err)
-	return err
+	s.pfsWriteMu.RLock()
+	defer s.pfsWriteMu.RUnlock()
+	return s.writeEncryptedImpl(time.Now().Add(timeout), encrypted)
 }
 
 // readLoop is an errgroup goroutine that reads from the transport and handles
@@ -1493,11 +1812,6 @@ func (s *Session) readLoop(ctx context.Context) (retErr error) {
 			retErr = fmt.Errorf("session: readLoop panic: %v", r)
 		}
 	}()
-
-	readTimeout := s.pingInterval * 2
-	if readTimeout < 30*time.Second {
-		readTimeout = 30 * time.Second
-	}
 
 	var handlers sync.WaitGroup
 	defer handlers.Wait()
@@ -1516,7 +1830,7 @@ func (s *Session) readLoop(ctx context.Context) (retErr error) {
 		updateFn := s.onUpdate
 		s.mu.RUnlock()
 
-		tp.SetReadDeadline(time.Now().Add(readTimeout))
+		tp.SetReadDeadline(time.Now().Add(s.adaptiveReadTimeout()))
 		data, err := tp.Recv()
 		if err != nil {
 			select {
@@ -1529,6 +1843,14 @@ func (s *Session) readLoop(ctx context.Context) (retErr error) {
 			}
 			if isTimeoutError(err) {
 				return fmt.Errorf("session: read deadline exceeded: %w", err)
+			}
+			if errors.Is(err, io.EOF) {
+				age := "unknown"
+				if at := s.connectedAt.Load(); at != nil {
+					age = time.Since(*at).Truncate(time.Second).String()
+				}
+				return fmt.Errorf("session: server closed connection (EOF) on %s after %s [sid=%d]: %w",
+					s.dc, age, s.sessionID, err)
 			}
 			return err
 		}
@@ -1562,7 +1884,18 @@ func (s *Session) readLoop(ctx context.Context) (retErr error) {
 			continue
 		}
 
-		s.addAck(raw.MsgID)
+		// Continuous server-time recalibration: the high 32 bits of every
+		// server-originated msg_id encode the server's unix time at send.
+		// Monotonically nudging the offset from each inbound message keeps it
+		// accurate for the session lifetime without waiting for a 16/17
+		// correction (tdlib's check_packet pattern). Cheap lock-free CAS; only
+		// ever moves the offset forward, so it cannot perturb msg_id ordering.
+		s.msgFactory.AdvanceServerTime(time.Unix(raw.MsgID>>32, 0))
+		s.lastActivityTime.Store(time.Now().UnixNano())
+
+		if requiresAck(raw.SeqNo) {
+			s.addAck(raw.MsgID)
+		}
 
 		rawHandled := s.handleRawPacket(raw.MsgID, raw.BodyRaw)
 		needsDecodedResult := s.hasDecodedResults()
@@ -1574,11 +1907,18 @@ func (s *Session) readLoop(ctx context.Context) (retErr error) {
 		}
 
 		if needsDecodedResult || updateFn != nil {
-			handlers.Add(1)
-			go func(raw *tg.MTProtoMessageRaw) {
-				defer handlers.Done()
+			select {
+			case s.dispatchSem <- struct{}{}:
+				handlers.Add(1)
+				go func(raw *tg.MTProtoMessageRaw) {
+					defer handlers.Done()
+					defer func() { <-s.dispatchSem }()
+					s.dispatchRaw(raw)
+				}(raw)
+			default:
+				// At capacity: process in-line (backpressure on sender).
 				s.dispatchRaw(raw)
-			}(raw)
+			}
 		}
 	}
 }
@@ -1591,9 +1931,28 @@ func (s *Session) pingLoop(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	delay := s.pingInterval + s.pongTimeout
+	if jitter := time.Duration(uint64(s.sessionID) % uint64(s.pingInterval)); jitter > 0 {
+		timer := time.NewTimer(jitter)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+
 	ticker := time.NewTicker(s.pingInterval)
 	defer ticker.Stop()
+	pongTimer := time.NewTimer(time.Hour)
+	if !pongTimer.Stop() {
+		<-pongTimer.C
+	}
+	defer pongTimer.Stop()
 
 	for {
 		select {
@@ -1604,24 +1963,129 @@ func (s *Session) pingLoop(ctx context.Context) error {
 
 		pingID := time.Now().UnixNano()
 		pongCh := make(chan struct{})
+		started := time.Now()
+		pongTimeout := s.adaptivePongTimeout()
+		delay := s.pingInterval + pongTimeout
+		disconnectDelay := int32((delay + time.Second - 1) / time.Second)
 
 		s.pingMux.Lock()
 		s.pingCbs[pingID] = pongCh
 		s.pingMux.Unlock()
 
-		s.sendServiceMessage(&tg.PingDelayDisconnectRequest{
+		if err := s.sendServiceMessage(&tg.PingDelayDisconnectRequest{
 			PingID:          pingID,
-			DisconnectDelay: int32(delay.Seconds()),
-		})
+			DisconnectDelay: max(disconnectDelay, 1),
+		}); err != nil {
+			s.removePingCallback(pingID)
+			return fmt.Errorf("session: ping write failed: %w", err)
+		}
 
+		pongTimer.Reset(pongTimeout)
 		select {
 		case <-ctx.Done():
+			s.removePingCallback(pingID)
+			if !pongTimer.Stop() {
+				select {
+				case <-pongTimer.C:
+				default:
+				}
+			}
 			return ctx.Err()
 		case <-pongCh:
-		case <-time.After(s.pongTimeout):
+			if !pongTimer.Stop() {
+				select {
+				case <-pongTimer.C:
+				default:
+				}
+			}
+			s.recordPingRTT(time.Since(started))
+		case <-pongTimer.C:
+			s.removePingCallback(pingID)
 			return fmt.Errorf("session: pong timeout")
 		}
 	}
+}
+
+func (s *Session) removePingCallback(pingID int64) {
+	s.pingMux.Lock()
+	delete(s.pingCbs, pingID)
+	s.pingMux.Unlock()
+}
+
+func (s *Session) recordPingRTT(sample time.Duration) {
+	oldRTT := time.Duration(s.rttEWMA.Load())
+	oldVariation := time.Duration(s.rttVariance.Load())
+	newRTT := sample
+	newVariation := sample / 2
+	if oldRTT > 0 {
+		delta := oldRTT - sample
+		if delta < 0 {
+			delta = -delta
+		}
+		newVariation = (3*oldVariation + delta) / 4
+		newRTT = (7*oldRTT + sample) / 8
+	}
+	s.rttEWMA.Store(int64(newRTT))
+	s.rttVariance.Store(int64(newVariation))
+	s.lastPong.Store(time.Now().UnixNano())
+
+	s.mu.RLock()
+	callback := s.onRTT
+	s.mu.RUnlock()
+	if callback != nil {
+		callback(newRTT, newVariation)
+	}
+}
+
+func (s *Session) adaptivePongTimeout() time.Duration {
+	configured := s.pongTimeout
+	if configured <= 0 {
+		configured = 30 * time.Second
+	}
+	rtt := time.Duration(s.rttEWMA.Load())
+	if rtt <= 0 {
+		return configured
+	}
+	variation := time.Duration(s.rttVariance.Load())
+	adaptive := rtt + 4*variation
+	adaptive = max(adaptive, time.Second)
+	return max(adaptive, configured)
+}
+
+// isActive reports whether the session has outstanding RPC calls that are
+// waiting for server responses. When true, the read deadline is tightened
+// so dead connections are detected much faster than the fixed idle timeout.
+func (s *Session) isActive() bool {
+	return s.pending.Count() > 0
+}
+
+// adaptiveReadTimeout returns the read deadline for the next Recv call.
+//
+// When the session is idle (no pending RPCs), the timeout is generous
+// (pingInterval * 2, min 30s) because the server may send nothing for long
+// stretches and the ping cycle keeps the connection alive.
+//
+// When the session is active (has pending RPCs), the timeout is RTT-based
+// with a 15s floor: if no data at all arrives within this window while we
+// are expecting responses, the connection is almost certainly dead. This
+// ports the liveness model from TDLib's SessionConnection: active timeouts
+// scale with RTT so the connection dies quickly under half-open failures
+// instead of waiting the full pingInterval * 2.
+func (s *Session) adaptiveReadTimeout() time.Duration {
+	idle := s.pingInterval * 2
+	if idle < 30*time.Second {
+		idle = 30 * time.Second
+	}
+	if !s.isActive() {
+		return idle
+	}
+	rtt := time.Duration(s.rttEWMA.Load())
+	if rtt <= 0 {
+		return idle
+	}
+	variation := time.Duration(s.rttVariance.Load())
+	active := max(rtt*4+4*variation, 15*time.Second)
+	return min(active, idle)
 }
 
 // handlePong signals the pong channel for the given pingID.
@@ -1639,31 +2103,48 @@ func (s *Session) handlePong(pingID int64) {
 // sends them periodically or when the batch is full.
 func (s *Session) ackLoop(ctx context.Context) error {
 	var buf []int64
+	seen := make(map[int64]struct{})
 	ticker := time.NewTicker(ackFlushInterval)
 	defer ticker.Stop()
 
-	flush := func() {
+	flush := func() error {
 		if len(buf) == 0 {
-			return
+			return nil
 		}
 		batch := make([]int64, len(buf))
 		copy(batch, buf)
+		start := time.Now()
+		if err := s.sendServiceMessage(&tg.MsgsAck{MsgIds: batch}); err != nil {
+			return fmt.Errorf("session: flush acknowledgements: %w", err)
+		}
 		buf = buf[:0]
-		s.sendServiceMessage(&tg.MsgsAck{MsgIds: batch})
+		clear(seen)
+		if elapsed := time.Since(start); elapsed > slowWriteThreshold && s.log != nil {
+			s.log.Warnf("session: slow ack flush: count=%d elapsed=%v", len(batch), elapsed)
+		}
+		return nil
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			flush()
+			_ = flush()
 			return ctx.Err()
 		case msgID := <-s.ackCh:
+			if _, ok := seen[msgID]; ok {
+				continue
+			}
+			seen[msgID] = struct{}{}
 			buf = append(buf, msgID)
 			if len(buf) >= 8192 {
-				flush()
+				if err := flush(); err != nil {
+					return err
+				}
 			}
 		case <-ticker.C:
-			flush()
+			if err := flush(); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -1671,10 +2152,13 @@ func (s *Session) ackLoop(ctx context.Context) error {
 // saltLoop is an errgroup goroutine that periodically requests future salts
 // from the server.
 func (s *Session) saltLoop(ctx context.Context) error {
+	timer := time.NewTimer(initialSaltFetchWait)
+	defer timer.Stop()
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(initialSaltFetchWait):
+	case <-timer.C:
 	}
 
 	s.fetchSaltsWithRetry(ctx)
@@ -1685,12 +2169,41 @@ func (s *Session) saltLoop(ctx context.Context) error {
 			wait = defaultSaltRefreshMin
 		}
 
+		timer.Reset(wait)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(wait):
+		case <-timer.C:
 			s.fetchSaltsWithRetry(ctx)
 		}
+	}
+}
+
+// pfsRenewalLoop is an errgroup goroutine that proactively renews the PFS
+// temporary key after 75% of its lifetime. It uses one deadline timer; expiry
+// cancels the errgroup and triggers a reconnect that generates a fresh key. If
+// PFS is disabled the loop blocks until the context is cancelled.
+//
+// Ported from tdesktop's create_gen_auth_key_actor renewal timer and
+// gotd/td's session.rekey logic. See https://core.telegram.org/api/pfs.
+func (s *Session) pfsRenewalLoop(ctx context.Context) error {
+	pfs := s.PFS()
+	if pfs == nil || !pfs.IsEnabled() {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	wait := pfs.rotationDueIn()
+	if wait <= 0 {
+		return fmt.Errorf("session: pfs temp key needs rotation")
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return fmt.Errorf("session: pfs temp key needs rotation")
 	}
 }
 
@@ -1736,17 +2249,12 @@ func (s *Session) fetchSaltsWithRetry(ctx context.Context) {
 // done channel, and closes the transport.
 func (s *Session) handleClose(ctx context.Context) error {
 	<-ctx.Done()
+	s.stopping.Store(true)
 	s.sm.transitionTo(StateDraining)
 	s.pending.RejectAll(ErrSessionClosed)
 	s.containerTracker.Cleanup()
-	s.floodWaits.Cleanup()
 	close(s.done)
-	s.mu.RLock()
-	tp := s.transport
-	s.mu.RUnlock()
-	if tp != nil {
-		tp.Close()
-	}
+	s.closeTransport()
 	return nil
 }
 
@@ -1754,17 +2262,7 @@ func (s *Session) dispatchRaw(raw *tg.MTProtoMessageRaw) {
 	s.mu.RLock()
 	panicFn := s.onPanic
 	s.mu.RUnlock()
-	defer func() {
-		if r := recover(); r != nil {
-			if panicFn != nil {
-				panicFn(r)
-			} else {
-				if s.log != nil {
-					s.log.Errorf("dispatchRaw panic: %v", r)
-				}
-			}
-		}
-	}()
+	defer s.recoverPanic("dispatchRaw", panicFn)
 	bodyReader := tg.NewReader(raw.BodyRaw)
 	defer tg.ReleaseReader(bodyReader)
 	body, err := tg.ReadTLObject(bodyReader)
@@ -1824,10 +2322,52 @@ func (s *Session) handleRawPacket(msgID int64, body []byte) bool {
 		if len(body) < 20 {
 			return false
 		}
-		s.pending.Resolve(int64(binary.LittleEndian.Uint64(body[4:12])), &tg.BadMsgNotification{
-			BadMsgID:    int64(binary.LittleEndian.Uint64(body[4:12])),
+		badMsgID := int64(binary.LittleEndian.Uint64(body[4:12]))
+		errorCode := int32(binary.LittleEndian.Uint32(body[16:20]))
+		if errorCode == 16 || errorCode == 17 {
+			// Codes 16 (msg_id too low) and 17 (msg_id too high) indicate
+			// client/server clock drift. The server's current time is encoded
+			// in the upper 32 bits of the notification's msg_id (msgID parameter).
+			serverTime := msgID >> 32
+			s.msgFactory.UpdateServerTime(time.Unix(serverTime, 0))
+			if s.log != nil {
+				s.log.Warnf("session: time corrected (code=%d) server_time=%d", errorCode, serverTime)
+			}
+			if errorCode == 17 && s.log != nil {
+				s.log.Warnf("session: msg_id too high (code=17), reconnect recommended to reset session")
+			}
+			// Resolve with BadMsgNotification so Invoke's retry loop
+			// re-sends the query with the corrected time (via a fresh
+			// msg_id from the updated MsgIDGenerator).
+			s.pending.Resolve(badMsgID, &tg.BadMsgNotification{
+				BadMsgID:    badMsgID,
+				BadMsgSeqno: int32(binary.LittleEndian.Uint32(body[12:16])),
+				ErrorCode:   errorCode,
+			})
+			return true
+		}
+		if errorCode == 20 {
+			// Code 20: msg_id too old, server cannot determine whether it
+			// received the message. Log and drop — no resolution possible.
+			if s.log != nil {
+				s.log.Warnf("session: bad_msg code 20 (msg_id too old) for msg_id=%d", badMsgID)
+			}
+			return true
+		}
+		if errorCode == 64 {
+			// Code 64: invalid container. Mark all children as failed.
+			if s.log != nil {
+				s.log.Warnf("session: bad_msg code 64 (invalid container) for msg_id=%d", badMsgID)
+			}
+			for _, childID := range s.containerTracker.NackContainer(badMsgID) {
+				s.pending.Reject(childID, fmt.Errorf("session: bad_msg code 64: invalid container (container msg_id=%d)", badMsgID))
+			}
+			return true
+		}
+		s.pending.Resolve(badMsgID, &tg.BadMsgNotification{
+			BadMsgID:    badMsgID,
 			BadMsgSeqno: int32(binary.LittleEndian.Uint32(body[12:16])),
-			ErrorCode:   int32(binary.LittleEndian.Uint32(body[16:20])),
+			ErrorCode:   errorCode,
 		})
 	case tg.BadServerSaltTypeID:
 		if len(body) < 28 {
@@ -1846,7 +2386,13 @@ func (s *Session) handleRawPacket(msgID int64, body []byte) bool {
 		if len(body) < 28 {
 			return false
 		}
-		s.saltMgr.StoreSimple(int64(binary.LittleEndian.Uint64(body[20:28])))
+		serverSalt := int64(binary.LittleEndian.Uint64(body[20:28]))
+		s.saltMgr.StoreSimple(serverSalt)
+		s.fireNewSession(
+			int64(binary.LittleEndian.Uint64(body[4:12])),
+			int64(binary.LittleEndian.Uint64(body[12:20])),
+			serverSalt,
+		)
 	case tg.FutureSaltsTypeID:
 		return s.handleRawFutureSalts(body)
 	case tg.MsgsAckTypeID:
@@ -1860,14 +2406,28 @@ func (s *Session) handleRawPacket(msgID int64, body []byte) bool {
 			s.addAck(int64(binary.LittleEndian.Uint64(body[4:12])))
 		}
 	case tg.MsgsStateReqTypeID:
-		s.handleRawMsgsStateReq(body[4:])
+		s.handleRawMsgsStateReq(msgID, body[4:])
+	case tg.MsgsStateInfoTypeID:
+		s.handleRawMsgsStateInfo(body[4:])
 	case tg.MsgResendReqTypeID:
-		s.handleRawMsgResendReq(body[4:])
+		s.handleRawMsgResendReq(msgID, body[4:])
 	case tg.MsgsAllInfoTypeID:
+		s.handleRawMsgsAllInfo(body[4:])
 	default:
 		return false
 	}
 	return true
+}
+
+// fireNewSession notifies the registered callback that the server sent a
+// new_session_created notification. Safe to call from any goroutine.
+func (s *Session) fireNewSession(firstMsgID, uniqueID, serverSalt int64) {
+	s.mu.RLock()
+	fn := s.onNewSession
+	s.mu.RUnlock()
+	if fn != nil {
+		fn(firstMsgID, uniqueID, serverSalt)
+	}
 }
 
 func (s *Session) handleRawMsgsAck(body []byte) {
@@ -1878,8 +2438,31 @@ func (s *Session) handleRawMsgsAck(body []byte) {
 		return
 	}
 	for _, ackedID := range msgIDs {
+		s.pending.MarkAcked(ackedID)
 		s.containerTracker.AckContainer(ackedID)
 		s.containerTracker.AckChild(ackedID)
+	}
+}
+
+// handleRawMsgsAllInfo parses the body of msgs_all_info (after constructor ID)
+// which is vector<long> msg_ids + string info. Unlike msgs_state_info, this
+// has no req_msg_id field.
+func (s *Session) handleRawMsgsAllInfo(body []byte) {
+	r := tg.NewReader(body)
+	defer tg.ReleaseReader(r)
+	msgIDs, err := r.ReadVectorLong()
+	if err != nil {
+		return
+	}
+	info, err := r.ReadString()
+	if err != nil {
+		return
+	}
+	for i, msgID := range msgIDs {
+		if i >= len(info) {
+			break
+		}
+		s.interpretStateByte(msgID, info[i])
 	}
 }
 
@@ -1950,7 +2533,14 @@ func (s *Session) handleRawContainer(body []byte) bool {
 		if length < 0 || off+length > len(body) {
 			return false
 		}
-		s.addAck(msgID)
+		// Validate each child msgID against replay/parity rules (#21).
+		if !s.msgIDValidator.Check(msgID) {
+			off += length
+			continue
+		}
+		if requiresAck(seqNo) {
+			s.addAck(msgID)
+		}
 		if !s.handleRawPacket(msgID, body[off:off+length]) && !s.decodeRawPacketIfNeeded(msgID, seqNo, body[off:off+length]) {
 			allHandled = false
 		}
@@ -2019,7 +2609,7 @@ func (s *Session) handleRawFutureSalts(body []byte) bool {
 	return true
 }
 
-func (s *Session) handleRawMsgsStateReq(body []byte) {
+func (s *Session) handleRawMsgsStateReq(msgID int64, body []byte) {
 	if len(body) < 8 {
 		return
 	}
@@ -2037,12 +2627,12 @@ func (s *Session) handleRawMsgsStateReq(body []byte) {
 		}
 	}
 	s.sendServiceMessage(&tg.MsgsStateInfo{
-		ReqMsgID: 0,
+		ReqMsgID: msgID,
 		Info:     string(info),
 	})
 }
 
-func (s *Session) handleRawMsgResendReq(body []byte) {
+func (s *Session) handleRawMsgResendReq(reqMsgID int64, body []byte) {
 	if len(body) < 8 {
 		return
 	}
@@ -2051,10 +2641,56 @@ func (s *Session) handleRawMsgResendReq(body []byte) {
 	if err != nil {
 		return
 	}
+	// Per the MTProto spec, msg_resend_req carries the IDs of messages
+	// previously sent by this client. For each we re-send the original
+	// payload; if a message has been forgotten (or the resend failed), the
+	// spec mandates replying with msgs_state_info — treating the request as a
+	// msgs_state_req — NOT acking our own msg_id.
+	var unknown []int64
 	for _, id := range msgIDs {
+		// Try to re-send the original encrypted payload.
+		if payload := s.pending.GetPayload(id); payload != nil {
+			_ = s.writeEncryptedDirect(payload, 10*time.Second)
+			continue
+		}
+		if seqNo, bodyRaw, ok := s.pending.GetResendMessage(id); ok {
+			s.mu.RLock()
+			authKey := s.authKey
+			authKeyID := s.authKeyID
+			s.mu.RUnlock()
+			payload, err := crypto.PackRaw(id, seqNo, bodyRaw, s.saltMgr.Load(), s.sessionIDBytes(), authKey, authKeyID)
+			if err == nil {
+				err = s.writeEncryptedDirect(payload, 10*time.Second)
+			}
+			if err == nil {
+				continue
+			}
+			if s.log != nil {
+				s.log.Warnf("msg_resend_req: failed to resend msg_id=%d: %v", id, err)
+			}
+		}
+		// Payload not available — clean up any tracked container and record
+		// the id so we report its state below. Acking our own outbound msg_id
+		// here is wrong: the server does not ack itself, and it skips the
+		// msgs_state_info response the spec requires for forgotten messages.
 		s.containerTracker.NackContainer(id)
-		s.addAck(id)
+		unknown = append(unknown, id)
 	}
+	if len(unknown) == 0 {
+		return
+	}
+	info := make([]byte, len(unknown))
+	for i := range unknown {
+		if s.pending.Has(unknown[i]) {
+			info[i] = 0x80 | 0x04
+		} else {
+			info[i] = 0x01
+		}
+	}
+	s.sendServiceMessage(&tg.MsgsStateInfo{
+		ReqMsgID: reqMsgID,
+		Info:     string(info),
+	})
 }
 
 func isTimeoutError(err error) bool {
@@ -2073,331 +2709,6 @@ func (s *Session) SetUpdateHandler(fn func(tg.TLObject)) {
 	s.mu.Unlock()
 }
 
-// TempKeyManager manages PFS temporary auth key lifecycle.
-// Ported from td/td/telegram/net/Session.cpp:1488-1498 (auth_loop TmpAuthKey).
-type TempKeyManager struct {
-	dcID       int
-	testMode   bool
-	permKey    []byte    // permanent auth key
-	tempKey    []byte    // current temp auth key
-	tempKeyID  int64     // SHA1-based temp key ID
-	expiresAt  time.Time // when the temp key expires
-	bound      bool      // whether auth.bindTempAuthKey succeeded
-	enabled    bool      // PFS mode flag
-	persistKey bool      // whether to persist temp key to storage
-	createdAt  time.Time // when this manager (and perm key) was initialized
-	needInit   bool      // caller must call initConnection after bind
-	storage    storage.Storage
-	mu         sync.Mutex
-}
-
-// NewTempKeyManager creates a new temp key manager.
-func NewTempKeyManager(dcID int, testMode bool, permKey []byte, enabled bool, persistKey bool, st storage.Storage) *TempKeyManager {
-	return &TempKeyManager{
-		dcID:       dcID,
-		testMode:   testMode,
-		permKey:    permKey,
-		enabled:    enabled,
-		persistKey: persistKey,
-		createdAt:  time.Now(),
-		storage:    st,
-	}
-}
-
-// IsEnabled reports whether PFS mode is active.
-func (m *TempKeyManager) IsEnabled() bool {
-	return m.enabled
-}
-
-// IsBound reports whether the temp key has been successfully bound to the
-// permanent key via auth.bindTempAuthKey.
-func (m *TempKeyManager) IsBound() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.bound
-}
-
-// PermKey returns the permanent auth key. Used for fallback when bind fails.
-func (m *TempKeyManager) PermKey() []byte {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.permKey
-}
-
-// NeedsInitConnection reports whether the caller must call initConnection
-// (wrapping help.getConfig) after a successful temp key binding. The flag is
-// set by Bind and cleared once read.
-//
-// The PFS spec requires rewriting client info after each binding — see
-// https://core.telegram.org/api/pfs.
-func (m *TempKeyManager) NeedsInitConnection() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	n := m.needInit
-	m.needInit = false
-	return n
-}
-
-// GetKey returns the current temp key and key ID. If PFS is disabled or no
-// temp key exists, returns the permanent key.
-func (m *TempKeyManager) GetKey() ([]byte, int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !m.enabled || len(m.tempKey) == 0 {
-		return m.permKey, computeAuthKeyIDInt64(m.permKey)
-	}
-	return m.tempKey, m.tempKeyID
-}
-
-// NeedsRotation reports whether the temp key is approaching expiry and needs rotation.
-func (m *TempKeyManager) NeedsRotation() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !m.enabled || len(m.tempKey) == 0 {
-		return false
-	}
-	// Rotate when within 30 seconds of expiry.
-	return time.Until(m.expiresAt) < 30*time.Second
-}
-
-// FallbackToPermKey disables PFS for this session (e.g., after bind failure).
-func (m *TempKeyManager) FallbackToPermKey() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.enabled = false
-	m.tempKey = nil
-	m.tempKeyID = 0
-	m.bound = false
-}
-
-// Generate performs DH exchange to generate a new temp key for PFS.
-// Uses p_q_inner_data_temp_dc so the server treats the key as temporary.
-// Ported from td/td/telegram/net/Session.cpp:1488-1498 (create_gen_auth_key_actor).
-func (m *TempKeyManager) Generate(transport Transport) error {
-	auth := &Auth{
-		DC:       m.dcID,
-		TestMode: m.testMode,
-	}
-
-	// Request a temp key with 24h expiry, matching MadelineProto's PFS_DURATION.
-	expiresIn := int32(24 * 60 * 60) // 24 hours
-	result, err := auth.CreateTemp(transport, expiresIn)
-	if err != nil {
-		return fmt.Errorf("temp key DH exchange: %w", err)
-	}
-
-	m.mu.Lock()
-	m.tempKey = result.AuthKey
-	m.tempKeyID = computeAuthKeyIDInt64(result.AuthKey)
-	m.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
-	m.bound = false
-	m.mu.Unlock()
-
-	return nil
-}
-
-// deriveMsgAESKeyIV computes the MTProto v1 AES key and IV from an auth key
-// and message key. x is the offset into auth_key (0 for client→server,
-// 8 for server→client). This is the same algorithm used in session/tdesktop.
-func deriveMsgAESKeyIV(authKey []byte, msgKey [16]byte, x int) (key [32]byte, iv [32]byte) {
-	sha1A := sha1.Sum(append(msgKey[:], authKey[x:x+32]...))
-	sha1B := sha1.Sum(append(append(authKey[x+32:x+48], msgKey[:]...), authKey[x+48:x+64]...))
-	sha1C := sha1.Sum(append(authKey[x+64:x+96], msgKey[:]...))
-	sha1D := sha1.Sum(append(msgKey[:], authKey[x+96:x+128]...))
-
-	copy(key[0:8], sha1A[0:8])
-	copy(key[8:20], sha1B[8:20])
-	copy(key[20:32], sha1C[4:16])
-
-	copy(iv[0:12], sha1A[8:20])
-	copy(iv[12:20], sha1B[0:8])
-	copy(iv[20:24], sha1C[16:20])
-	copy(iv[24:32], sha1D[0:8])
-	return key, iv
-}
-
-// buildEncryptedBindMessage constructs the encrypted_message for
-// auth.bindTempAuthKey, following the format described at
-// https://core.telegram.org/method/auth.bindTempAuthKey#binding-message-contents
-//
-// The message contains a bind_auth_key_inner payload, wrapped in a standard
-// MTProto message structure, encrypted with AES-IGE using a key derived from
-// the permanent auth key.
-func (m *TempKeyManager) buildEncryptedBindMessage(permKey, tempKey []byte, permKeyID, nonce, sessionID int64, expiresAt int32) ([]byte, error) {
-	// 1. Serialize bind_auth_key_inner.
-	inner := &tg.BindAuthKeyInner{
-		Nonce:         nonce,
-		TempAuthKeyID: computeAuthKeyIDInt64(tempKey),
-		PermAuthKeyID: permKeyID,
-		TempSessionID: sessionID,
-		ExpiresAt:     expiresAt,
-	}
-	var innerBuf bytes.Buffer
-	if err := inner.Encode(&innerBuf); err != nil {
-		return nil, fmt.Errorf("encode bind_auth_key_inner: %w", err)
-	}
-	innerBytes := innerBuf.Bytes()
-
-	// 2. Build MTProto message: random(16) + msg_id(8) + seq_no(4) + length(4) + data
-	var randPrefix [16]byte
-	if _, err := rand.Read(randPrefix[:]); err != nil {
-		return nil, fmt.Errorf("generate random prefix: %w", err)
-	}
-	now := time.Now()
-	msgID := (now.Unix() << 32) | int64(now.Nanosecond()&^3)
-
-	msg := make([]byte, 0, 32+len(innerBytes))
-	msg = append(msg, randPrefix[:]...)
-	var buf8 [8]byte
-	binary.LittleEndian.PutUint64(buf8[:], uint64(msgID))
-	msg = append(msg, buf8[:]...)
-	var buf4 [4]byte
-	binary.LittleEndian.PutUint32(buf4[:], 0) // seq_no = 0
-	msg = append(msg, buf4[:]...)
-	binary.LittleEndian.PutUint32(buf4[:], uint32(len(innerBytes)))
-	msg = append(msg, buf4[:]...)
-	msg = append(msg, innerBytes...)
-
-	// 3. msg_key = last 16 bytes of SHA1(message)
-	msgHash := sha1.Sum(msg)
-	var msgKey [16]byte
-	copy(msgKey[:], msgHash[4:20])
-
-	// 4. Pad to 16-byte multiple with random bytes.
-	padLen := (16 - len(msg)%16) % 16
-	if padLen > 0 {
-		pad := make([]byte, padLen)
-		if _, err := rand.Read(pad); err != nil {
-			return nil, fmt.Errorf("generate padding: %w", err)
-		}
-		msg = append(msg, pad...)
-	}
-
-	// 5. Derive AES key/IV from permanent auth key + msg_key (x=0 client→server).
-	aesKey, aesIV := deriveMsgAESKeyIV(permKey, msgKey, 0)
-
-	// 6. AES-IGE encrypt.
-	encrypted, err := crypto.IGEEncrypt(msg, aesKey[:], aesIV[:])
-	if err != nil {
-		return nil, fmt.Errorf("encrypt binding message: %w", err)
-	}
-	defer crypto.ReleaseAESBuf(encrypted)
-
-	// 7. Final: perm_auth_key_id(8) + msg_key(16) + encrypted_data.
-	result := make([]byte, 0, 8+16+len(encrypted))
-	binary.LittleEndian.PutUint64(buf8[:], uint64(permKeyID))
-	result = append(result, buf8[:]...)
-	result = append(result, msgKey[:]...)
-	result = append(result, encrypted...)
-	return result, nil
-}
-
-// ErrBindRequiresKeyRotation signals that auth.bindTempAuthKey returned
-// ENCRYPTED_MESSAGE_INVALID and the permanent auth key is older than 60 seconds.
-// Both the permanent and temporary keys must be dropped and recreated.
-var ErrBindRequiresKeyRotation = fmt.Errorf("session: ENCRYPTED_MESSAGE_INVALID with stale perm key; both keys must be recreated")
-
-// Bind calls auth.bindTempAuthKey to bind the temp key to the permanent key.
-// The encrypted_message is constructed per the MTProto PFS spec.
-// Ported from td/td/telegram/net/Session.cpp:1556-1579 (need_send_bind_key).
-//
-// If the server returns ENCRYPTED_MESSAGE_INVALID and the permanent key was
-// created more than 60 seconds ago, Bind returns ErrBindRequiresKeyRotation.
-// The caller must then drop both keys, recreate them, and retry.
-// See https://core.telegram.org/api/pfs for the full recovery procedure.
-func (m *TempKeyManager) Bind(ctx context.Context, sessionID int64, invoke func(ctx context.Context, query tg.TLObject, retries int, timeout time.Duration) (tg.TLObject, error)) error {
-	m.mu.Lock()
-	tempKey := m.tempKey
-	permKey := m.permKey
-	expiresAt := m.expiresAt
-	createdAt := m.createdAt
-	m.mu.Unlock()
-
-	if len(tempKey) == 0 {
-		return fmt.Errorf("temp key not generated")
-	}
-	if len(permKey) < 256 {
-		return fmt.Errorf("permanent key too short: %d bytes", len(permKey))
-	}
-
-	permKeyID := computeAuthKeyIDInt64(permKey)
-
-	// Generate random nonce.
-	var nonceBytes [8]byte
-	if _, err := rand.Read(nonceBytes[:]); err != nil {
-		return fmt.Errorf("generate nonce: %w", err)
-	}
-	nonce := int64(binary.LittleEndian.Uint64(nonceBytes[:]))
-
-	// Build the encrypted binding message.
-	encMsg, err := m.buildEncryptedBindMessage(permKey, tempKey, permKeyID, nonce, sessionID, int32(expiresAt.Unix()))
-	if err != nil {
-		return fmt.Errorf("build bind message: %w", err)
-	}
-
-	bindReq := &tg.AuthBindTempAuthKeyRequest{
-		PermAuthKeyID:    permKeyID,
-		Nonce:            nonce,
-		ExpiresAt:        int32(expiresAt.Unix()),
-		EncryptedMessage: encMsg,
-	}
-
-	_, err = invoke(ctx, bindReq, 1, 10*time.Second)
-	if err != nil {
-		m.mu.Lock()
-		m.bound = false
-		m.mu.Unlock()
-
-		// Handle ENCRYPTED_MESSAGE_INVALID per the PFS spec.
-		if tgerr.Is(err, tgerr.ErrEncryptedMessageInvalid) {
-			if time.Since(createdAt) > 60*time.Second {
-				return ErrBindRequiresKeyRotation
-			}
-			return fmt.Errorf("auth.bindTempAuthKey (ENCRYPTED_MESSAGE_INVALID, key <60s old, will retry): %w", err)
-		}
-		return fmt.Errorf("auth.bindTempAuthKey: %w", err)
-	}
-
-	m.mu.Lock()
-	m.bound = true
-	m.needInit = true // caller must initConnection after bind per PFS spec
-	m.mu.Unlock()
-	return nil
-}
-
-// LoadFromStorage loads a persisted temp key from storage.
-func (m *TempKeyManager) LoadFromStorage() error {
-	if !m.persistKey || m.storage == nil {
-		return nil
-	}
-	// TODO: implement storage load for temp key
-	// Key: temp_auth_key_{dcID}
-	return nil
-}
-
-// SaveToStorage persists the current temp key to storage.
-func (m *TempKeyManager) SaveToStorage() error {
-	if !m.persistKey || m.storage == nil {
-		return nil
-	}
-	// TODO: implement storage save for temp key
-	// Key: temp_auth_key_{dcID}
-	return nil
-}
-
-// PrepareForReconnect marks all pending queries as unknown and returns their
-// IDs. Call this before stopping the session to preserve pending queries for
-// recovery on the next session.
-// Ported from td/td/telegram/net/SessionProxy.cpp:177-183 (on_failed → close+open).
-func (s *Session) PrepareForReconnect() []int64 {
-	return s.pending.MarkAllUnknown()
-}
-
-// HasUnknownQueries reports whether there are pending queries marked as unknown.
-func (s *Session) HasUnknownQueries() bool {
-	return len(s.pending.GetUnknown()) > 0
-}
-
 // Connect sets the transport and starts the session. It requires that an auth
 // key has already been established. Returns an error if no auth key is set.
 func (s *Session) Connect(transport Transport, timeout time.Duration) error {
@@ -2413,6 +2724,8 @@ func (s *Session) Connect(transport Transport, timeout time.Duration) error {
 // ConnectContext sets the transport and starts the session. It requires that an
 // auth key has already been established. The context bounds the startup ping.
 func (s *Session) ConnectContext(ctx context.Context, transport Transport) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	if !s.sm.canConnect() {
 		state := s.sm.State()
 		if state == StateClosed {
@@ -2420,10 +2733,8 @@ func (s *Session) ConnectContext(ctx context.Context, transport Transport) error
 		}
 		return fmt.Errorf("session: connect: already connected (state=%s)", state)
 	}
-	if transport != nil {
-		s.mu.Lock()
-		s.transport = transport
-		s.mu.Unlock()
+	if transport != nil && !s.attachTransport(transport) {
+		return ErrSessionClosed
 	}
 	s.mu.RLock()
 	authKey := s.authKey
@@ -2431,7 +2742,7 @@ func (s *Session) ConnectContext(ctx context.Context, transport Transport) error
 	if len(authKey) == 0 {
 		return ErrConnectNoAuthKey
 	}
-	return s.StartContext(ctx)
+	return s.startContextLocked(ctx)
 }
 
 // ConnectWithAuth sets the transport and performs key generation via authFunc
@@ -2451,6 +2762,8 @@ func (s *Session) ConnectWithAuth(transport Transport, authFunc AuthFunc, timeou
 // authFunc if no auth key is currently set. The context bounds authentication
 // and the startup ping.
 func (s *Session) ConnectWithAuthContext(ctx context.Context, transport Transport, authFunc AuthFunc) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	if !s.sm.canConnect() {
 		state := s.sm.State()
 		if state == StateClosed {
@@ -2458,14 +2771,16 @@ func (s *Session) ConnectWithAuthContext(ctx context.Context, transport Transpor
 		}
 		return fmt.Errorf("session: connect: already connected (state=%s)", state)
 	}
-	if transport != nil {
-		s.mu.Lock()
-		s.transport = transport
-		s.mu.Unlock()
+	if transport != nil && !s.attachTransport(transport) {
+		return ErrSessionClosed
+	}
+	if s.stopping.Load() {
+		return ErrSessionClosed
 	}
 	s.mu.RLock()
 	authKey := s.authKey
 	s.mu.RUnlock()
+	generatedKey := false
 	if len(authKey) == 0 && authFunc != nil {
 		s.mu.RLock()
 		tp := s.transport
@@ -2474,19 +2789,59 @@ func (s *Session) ConnectWithAuthContext(ctx context.Context, transport Transpor
 		if err != nil {
 			return fmt.Errorf("session: connect with auth: %w", err)
 		}
-		s.mu.Lock()
-		s.authKey = result.AuthKey
-		s.authKeyID = computeAuthKeyID(result.AuthKey)
-		s.mu.Unlock()
-		s.saltMgr.StoreSimple(result.ServerSalt)
+		// AuthFunc does not accept a context, so Stop must not wait for it. Once
+		// authentication returns, publish the short setup window before writing
+		// the key so Stop can wait for persistence and its rollback to finish.
+		setupDone := make(chan struct{})
+		s.runMu.Lock()
+		if s.stopping.Load() {
+			s.runMu.Unlock()
+			return ErrSessionClosed
+		}
+		s.setupDone = setupDone
+		s.runMu.Unlock()
+		defer func() {
+			s.runMu.Lock()
+			close(setupDone)
+			if s.setupDone == setupDone {
+				s.setupDone = nil
+			}
+			s.runMu.Unlock()
+		}()
 		if s.storage != nil {
 			if err := s.storage.SetAuthKey(result.AuthKey); err != nil {
 				return fmt.Errorf("session: save auth key: %w", err)
 			}
 		}
+		if s.stopping.Load() {
+			if s.storage != nil {
+				if err := s.storage.SetAuthKey(nil); err != nil {
+					return errors.Join(ErrSessionClosed, fmt.Errorf("session: clear canceled auth key: %w", err))
+				}
+			}
+			return ErrSessionClosed
+		}
+		s.mu.Lock()
+		s.authKey = result.AuthKey
+		s.authKeyID = computeAuthKeyID(result.AuthKey)
+		s.mu.Unlock()
+		s.saltMgr.StoreSimple(result.ServerSalt)
 		s.msgFactory.UpdateServerTime(time.Unix(int64(result.ServerTime), 0))
+		generatedKey = true
 	}
-	return s.StartContext(ctx)
+	err := s.startContextLocked(ctx)
+	if generatedKey && errors.Is(err, ErrSessionClosed) {
+		s.mu.Lock()
+		s.authKey = nil
+		s.authKeyID = nil
+		s.mu.Unlock()
+		if s.storage != nil {
+			if clearErr := s.storage.SetAuthKey(nil); clearErr != nil {
+				return errors.Join(err, fmt.Errorf("session: clear canceled auth key: %w", clearErr))
+			}
+		}
+	}
+	return err
 }
 
 func unpackIncomingMessageEnvelope(data, sessionID, authKey, authKeyID []byte) (*tg.MTProtoMessageRaw, []byte, error) {

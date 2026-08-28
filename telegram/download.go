@@ -1,3 +1,28 @@
+// Download API
+//
+// Two download APIs coexist for backwards compatibility:
+//
+// New API (preferred):
+//
+//	Download(ctx, input, opts)    — download with any input type (uses any for location)
+//	DownloadBytes(ctx, input, opts) — download into []byte
+//	StreamMedia(ctx, input, opts)   — stream chunks via channel
+//
+// Old API (retained for compatibility):
+//
+//	DownloadFile(ctx, location, fileSize, opts)      — download into []byte
+//	DownloadToFile(ctx, location, filePath, size, opts) — download to disk
+//	DownloadMedia(ctx, media, opts)                    — download media with progress
+//	DownloadMediaToFile(ctx, media, filePath, opts)    — download media to disk
+//	StreamFile(ctx, location, fileSize, opts)          — stream chunks via channel
+//
+// Migration:
+//
+//	DownloadFile   → DownloadBytes
+//	StreamFile     → StreamMedia
+//	DownloadMedia  → Download (with progress callback)
+//
+// Chunk types: StreamChunk supersedes FileChunk. New code should use StreamChunk.
 package telegram
 
 import (
@@ -10,20 +35,92 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/mtgo-labs/mtgo/internal/session"
 	"github.com/mtgo-labs/mtgo/telegram/params"
 	"github.com/mtgo-labs/mtgo/telegram/types"
 	"github.com/mtgo-labs/mtgo/tg"
 	"github.com/mtgo-labs/mtgo/tgerr"
 )
 
-const maxDownloadRecoveries = 10
+const maxDownloadRecoveries = 100
+
+// maxFileRefRetries caps the number of automatic file-reference refresh
+// attempts during a single download to avoid infinite retry loops.
+const maxFileRefRetries = 3
+
+// defaultDownloadPacing is the inter-request delay applied to cross-DC
+// downloads when RequestDelay is unset. This prevents the download DC from
+// forcefully disconnecting sessions that request too aggressively.
+const defaultDownloadPacing = 25 * time.Millisecond
+
+func downloadPacingDelay(opts *params.Download, dcID, homeDC int) time.Duration {
+	if opts != nil && opts.RequestDelay != 0 {
+		if opts.RequestDelay < 0 {
+			return 0
+		}
+		return opts.RequestDelay
+	}
+	// Cross-DC downloads are rate-limited by the remote DC; pace them.
+	if dcID > 0 && homeDC > 0 && dcID != homeDC {
+		return defaultDownloadPacing
+	}
+	return 0
+}
 
 var errParallelDownloadUnsupported = errors.New("download: parallel download unsupported for response")
+
+// ErrDownloadStalled is returned when no data has been received within the
+// configured StallTimeout. Useful for bulk downloads where some files may be
+// unavailable server-side and would otherwise hang indefinitely.
+var ErrDownloadStalled = errors.New("download: stalled (no data received within timeout)")
+
+// stallTimer wraps a context with a resettable deadline. Each successful chunk
+// resets the timer; if no chunk arrives within timeout, the context is cancelled
+// with ErrDownloadStalled as the cause.
+type stallTimer struct {
+	timer  *time.Timer
+	cancel context.CancelCauseFunc
+	dur    time.Duration
+}
+
+func newStallTimer(ctx context.Context, timeout time.Duration) (*stallTimer, context.Context) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	st := &stallTimer{
+		cancel: cancel,
+		dur:    timeout,
+	}
+	st.timer = time.AfterFunc(timeout, func() {
+		cancel(ErrDownloadStalled)
+	})
+	return st, ctx
+}
+
+func (st *stallTimer) reset() {
+	if st != nil {
+		st.timer.Reset(st.dur)
+	}
+}
+
+func (st *stallTimer) stop() {
+	if st != nil {
+		st.timer.Stop()
+		st.cancel(nil)
+	}
+}
+
+// downloadStallTimeout extracts the stall timeout from opts, returning 0 if disabled.
+func downloadStallTimeout(opts *params.Download) time.Duration {
+	if opts != nil && opts.StallTimeout > 0 {
+		return opts.StallTimeout
+	}
+	return 0
+}
 
 // FileChunk represents a single chunk of data received during a streamed file download.
 // It is delivered over the channel returned by StreamFile. Each chunk contains the raw
@@ -86,7 +183,8 @@ type FileChunk struct {
 //	}
 //	fmt.Printf("Downloaded %d bytes\n", len(data))
 func (c *Client) DownloadFile(ctx context.Context, location tg.InputFileLocationClass, fileSize int64, opts *params.Download) ([]byte, error) {
-	if err := c.ensureConnected(); err != nil {
+	ctx = withTransferRetry(ctx)
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -103,7 +201,7 @@ func (c *Client) DownloadFile(ctx context.Context, location tg.InputFileLocation
 
 	if shouldParallelDownload(fileSize, (*memoryBuffer)(nil), opts, int(dcID), c.homeDC()) {
 		buf := memoryBuffer{data: make([]byte, int(fileSize))}
-		rpcs, err := c.dcRPCPool(ctx, int(dcID), downloadPoolSize(opts, fileSize, int(dcID), c.homeDC()))
+		rpcs, err := c.dcRPCPool(ctx, int(dcID), downloadWorkers(opts, fileSize, int(dcID), c.homeDC()))
 		if err != nil {
 			return nil, fmt.Errorf("download: dc rpc pool: %w", err)
 		}
@@ -165,7 +263,8 @@ serialDownload:
 //	    log.Fatal(err)
 //	}
 func (c *Client) DownloadToFile(ctx context.Context, location tg.InputFileLocationClass, filePath string, fileSize int64, opts *params.Download) error {
-	if err := c.ensureConnected(); err != nil {
+	ctx = withTransferRetry(ctx)
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return err
 	}
 
@@ -187,7 +286,7 @@ func (c *Client) DownloadToFile(ctx context.Context, location tg.InputFileLocati
 	defer f.Close()
 
 	if shouldParallelDownload(fileSize, f, opts, int(dcID), c.homeDC()) {
-		rpcs, err := c.dcRPCPool(ctx, int(dcID), downloadPoolSize(opts, fileSize, int(dcID), c.homeDC()))
+		rpcs, err := c.dcRPCPool(ctx, int(dcID), downloadWorkers(opts, fileSize, int(dcID), c.homeDC()))
 		if err != nil {
 			os.Remove(filePath)
 			return fmt.Errorf("download: dc rpc pool: %w", err)
@@ -251,7 +350,7 @@ serialFileDownload:
 //	}
 //	fmt.Printf("Downloaded photo thumbnail: %d bytes\n", len(data))
 func (c *Client) DownloadMedia(ctx context.Context, media types.Media, thumbSize string, opts *params.Download) ([]byte, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -299,7 +398,7 @@ func (c *Client) DownloadMedia(ctx context.Context, media types.Media, thumbSize
 //	    log.Fatal(err)
 //	}
 func (c *Client) DownloadMediaToFile(ctx context.Context, media types.Media, thumbSize string, filePath string, fileSize int64, opts *params.Download) error {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return err
 	}
 
@@ -352,7 +451,8 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, media types.Media, thu
 //	    _, _ = os.Stdout.Write(chunk.Data)
 //	}
 func (c *Client) StreamFile(ctx context.Context, location tg.InputFileLocationClass, fileSize int64, opts *params.Download) (<-chan FileChunk, error) {
-	if err := c.ensureConnected(); err != nil {
+	ctx = withTransferRetry(ctx)
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -432,13 +532,20 @@ func chunkSizeForDownload(opts *params.Download) int32 {
 func downloadToFileRPC(ctx context.Context, rpc *tg.RPCClient, location tg.InputFileLocationClass, fileSize int64, writer io.Writer, opts *params.Download) (int64, *tg.UploadFileCDNRedirect, error) {
 	chunkSize := chunkSizeForDownload(opts)
 
+	var st *stallTimer
+	if d := downloadStallTimeout(opts); d > 0 {
+		st, ctx = newStallTimer(ctx, d)
+		defer st.stop()
+	}
+
 	var totalWritten int64
 	offset := int64(0)
+	refRetries := 0
 
 	for {
 		select {
 		case <-ctx.Done():
-			return totalWritten, nil, ctx.Err()
+			return totalWritten, nil, context.Cause(ctx)
 		default:
 		}
 
@@ -450,6 +557,15 @@ func downloadToFileRPC(ctx context.Context, rpc *tg.RPCClient, location tg.Input
 
 		result, err := rpc.UploadGetFile(ctx, req)
 		if err != nil {
+			// G11: automatic file reference refresh on FILE_REFERENCE_EXPIRED.
+			if opts != nil && opts.FileRefresher != nil &&
+				tgerr.Is(err, tgerr.ErrFileReferenceExpired) && refRetries < maxFileRefRetries {
+				if newLoc, refErr := tryRefreshLocationFileRef(ctx, location, opts.FileRefresher); refErr == nil {
+					location = newLoc
+					refRetries++
+					continue
+				}
+			}
 			return totalWritten, nil, fmt.Errorf("download: get file at offset %d: %w", offset, err)
 		}
 
@@ -464,6 +580,15 @@ func downloadToFileRPC(ctx context.Context, rpc *tg.RPCClient, location tg.Input
 				return totalWritten, nil, fmt.Errorf("download: write: %w", err)
 			}
 			totalWritten += int64(n)
+			st.reset()
+
+			// G10: verify SHA-256 hashes for this chunk if enabled.
+			if opts != nil && opts.VerifyHashes {
+				if hashErr := verifyDownloadChunkHash(ctx, rpc, location, offset, file.Bytes); hashErr != nil {
+					return totalWritten, nil, hashErr
+				}
+			}
+
 			offset += int64(n)
 
 			if n < int(chunkSize) {
@@ -492,34 +617,39 @@ func downloadToFileRPC(ctx context.Context, rpc *tg.RPCClient, location tg.Input
 }
 
 func (c *Client) downloadToWriter(ctx context.Context, rpc *tg.RPCClient, dcID int, location tg.InputFileLocationClass, fileSize int64, writer io.Writer, opts *params.Download) (int64, error) {
+	// Route through downloadToWriterFromOffset from offset 0 for unified
+	// recovery handling. This ensures every chunk failure gets the full
+	// recovery loop (reconnect + retry) instead of only the first error.
 	written, cdnRedirect, err := downloadToFileRPC(ctx, rpc, location, fileSize, writer, opts)
 	if cdnRedirect != nil {
-		cdnWritten, cdnErr := c.downloadCDNToWriter(ctx, cdnRedirect, fileSize, writer, opts)
+		cdnWritten, cdnErr := c.downloadCDNToWriter(ctx, cdnRedirect, written, fileSize, writer, opts)
 		if cdnErr != nil {
 			return written + cdnWritten, cdnErr
 		}
 		return written + cdnWritten, nil
 	}
-	if err != nil {
-		migratedRPC, ok, migrateErr := c.fileMigrationRPC(ctx, dcID, written, err)
-		if migrateErr != nil {
-			return written, migrateErr
-		}
-		if !ok {
-			recoveredRPC, recovered, recoverErr := c.recoverDownloadRPC(ctx, dcID, err)
-			if recoverErr != nil {
-				return written, recoverErr
-			}
-			if !recovered {
-				return written, err
-			}
-			recoveredWritten, e := c.downloadToWriterFromOffset(ctx, recoveredRPC, dcID, location, fileSize, writer, opts, written)
-			return recoveredWritten, e
-		}
-		w, _, e := downloadToFileRPC(ctx, migratedRPC, location, fileSize, writer, opts)
-		return w, e
+	if err == nil {
+		return written, nil
 	}
-	return written, nil
+
+	// On first failure, attempt DC migration (only valid at offset 0).
+	if written == 0 {
+		migratedRPC, ok, migrateErr := c.fileMigrationRPC(ctx, dcID, 0, err)
+		if migrateErr != nil {
+			return 0, migrateErr
+		}
+		if ok {
+			w, e := c.downloadToWriterFromOffset(ctx, migratedRPC, dcID, location, fileSize, writer, opts, 0)
+			return w, e
+		}
+	}
+
+	// Delegate to downloadToWriterFromOffset which has the full recovery loop
+	// (reconnect + retry up to maxDownloadRecoveries times). Passing the
+	// initial RPC lets it attempt the first retry without reconnect if the
+	// error was transient (e.g., a single RPC timeout).
+	recoveredWritten, e := c.downloadToWriterFromOffset(ctx, rpc, dcID, location, fileSize, writer, opts, written)
+	return recoveredWritten, e
 }
 
 func shouldParallelDownload(fileSize int64, writer io.Writer, opts *params.Download, dcID int, homeDC int) bool {
@@ -531,12 +661,6 @@ func shouldParallelDownload(fileSize int64, writer io.Writer, opts *params.Downl
 }
 
 func downloadWorkers(opts *params.Download, fileSize int64, dcID int, homeDC int) int {
-	// Cross-DC downloads use a single worker to avoid DC session auth race
-	// conditions (AUTH_KEY_UNREGISTERED) when multiple sessions are created
-	// before auth export/import completes.
-	if dcID > 0 && homeDC > 0 && dcID != homeDC {
-		return 1
-	}
 	if opts != nil && opts.Workers == 1 {
 		return 1
 	}
@@ -550,16 +674,18 @@ func downloadWorkers(opts *params.Download, fileSize int64, dcID int, homeDC int
 	return min(defaultTransferWorkers, parts)
 }
 
-func downloadPoolSize(opts *params.Download, fileSize int64, dcID int, homeDC int) int {
-	return downloadWorkers(opts, fileSize, dcID, homeDC)
-}
-
 func (c *Client) downloadToWriterAt(ctx context.Context, rpcs []*tg.RPCClient, dcID int, location tg.InputFileLocationClass, fileSize int64, writer io.WriterAt, opts *params.Download) (int64, error) {
 	chunkSize := chunkSizeForDownload(opts)
 
 	workers := downloadWorkers(opts, fileSize, dcID, c.homeDC())
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	var st *stallTimer
+	if d := downloadStallTimeout(opts); d > 0 {
+		st, ctx = newStallTimer(ctx, d)
+		defer st.stop()
+	}
 
 	type job struct {
 		offset int64
@@ -582,6 +708,7 @@ func (c *Client) downloadToWriterAt(ctx context.Context, rpcs []*tg.RPCClient, d
 			defer wg.Done()
 			currentRPC := rpcs[workerIdx%len(rpcs)]
 			recoveries := 0
+			backoff := time.Duration(0)
 			for j := range jobs {
 				var file *tg.UploadFile
 				for {
@@ -606,12 +733,28 @@ func (c *Client) downloadToWriterAt(ctx context.Context, rpcs []*tg.RPCClient, d
 						if recovered && recoveries < maxDownloadRecoveries {
 							recoveries++
 							currentRPC = recoveredRPC
+							// Exponential backoff between recovery attempts.
+							if backoff == 0 {
+								backoff = time.Second
+							} else {
+								backoff *= 2
+								if backoff > 30*time.Second {
+									backoff = 30 * time.Second
+								}
+							}
+							select {
+							case <-ctx.Done():
+								results <- result{offset: j.offset, err: ctx.Err()}
+								return
+							case <-time.After(backoff):
+							}
 							continue
 						}
 						results <- result{offset: j.offset, err: fmt.Errorf("download: get file at offset %d: %w", j.offset, err)}
 						return
 					}
 					recoveries = 0
+					backoff = 0
 
 					var ok bool
 					file, ok = res.(*tg.UploadFile)
@@ -643,7 +786,17 @@ func (c *Client) downloadToWriterAt(ctx context.Context, rpcs []*tg.RPCClient, d
 						IsUpload:        false,
 					})
 				}
+				st.reset()
 				results <- result{offset: j.offset, n: n}
+
+				// Pace requests to avoid triggering the DC's rate limiter.
+				if delay := downloadPacingDelay(opts, dcID, c.homeDC()); delay > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(delay):
+					}
+				}
 			}
 		}(i)
 	}
@@ -677,7 +830,7 @@ func (c *Client) downloadToWriterAt(ctx context.Context, rpcs []*tg.RPCClient, d
 			if firstErr != nil {
 				return done.Load(), firstErr
 			}
-			return done.Load(), ctx.Err()
+			return done.Load(), context.Cause(ctx)
 		case r, ok := <-results:
 			if !ok {
 				if firstErr != nil {
@@ -716,12 +869,20 @@ func (c *Client) downloadToWriterAt(ctx context.Context, rpcs []*tg.RPCClient, d
 func (c *Client) downloadToWriterFromOffset(ctx context.Context, rpc *tg.RPCClient, dcID int, location tg.InputFileLocationClass, fileSize int64, writer io.Writer, opts *params.Download, offset int64) (int64, error) {
 	chunkSize := chunkSizeForDownload(opts)
 
+	var st *stallTimer
+	if d := downloadStallTimeout(opts); d > 0 {
+		st, ctx = newStallTimer(ctx, d)
+		defer st.stop()
+	}
+
 	totalWritten := offset
 	recoveries := 0
+	refRetries := 0
+	backoff := time.Duration(0)
 	for {
 		select {
 		case <-ctx.Done():
-			return totalWritten, ctx.Err()
+			return totalWritten, context.Cause(ctx)
 		default:
 		}
 
@@ -731,6 +892,15 @@ func (c *Client) downloadToWriterFromOffset(ctx context.Context, rpc *tg.RPCClie
 			Limit:    chunkSize,
 		})
 		if err != nil {
+			// G11: automatic file reference refresh on FILE_REFERENCE_EXPIRED.
+			if opts != nil && opts.FileRefresher != nil &&
+				tgerr.Is(err, tgerr.ErrFileReferenceExpired) && refRetries < maxFileRefRetries {
+				if newLoc, refErr := tryRefreshLocationFileRef(ctx, location, opts.FileRefresher); refErr == nil {
+					location = newLoc
+					refRetries++
+					continue
+				}
+			}
 			recoveredRPC, recovered, recoverErr := c.recoverDownloadRPC(ctx, dcID, err)
 			if recoverErr != nil {
 				return totalWritten, recoverErr
@@ -740,14 +910,31 @@ func (c *Client) downloadToWriterFromOffset(ctx context.Context, rpc *tg.RPCClie
 			}
 			recoveries++
 			rpc = recoveredRPC
+
+			// Exponential backoff between recovery attempts to give the
+			// network/DC time to stabilise. Starts at 1s, doubles up to 30s.
+			if backoff == 0 {
+				backoff = time.Second
+			} else {
+				backoff *= 2
+				if backoff > 30*time.Second {
+					backoff = 30 * time.Second
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return totalWritten, context.Cause(ctx)
+			case <-time.After(backoff):
+			}
 			continue
 		}
 		recoveries = 0
+		backoff = 0
 
 		file, ok := result.(*tg.UploadFile)
 		if !ok {
 			if cdnRedirect, ok := result.(*tg.UploadFileCDNRedirect); ok {
-				cdnWritten, cdnErr := c.downloadCDNToWriter(ctx, cdnRedirect, fileSize, writer, opts)
+				cdnWritten, cdnErr := c.downloadCDNToWriter(ctx, cdnRedirect, totalWritten, fileSize, writer, opts)
 				return totalWritten + cdnWritten, cdnErr
 			}
 			return totalWritten, fmt.Errorf("download: unexpected result type %T", result)
@@ -761,7 +948,16 @@ func (c *Client) downloadToWriterFromOffset(ctx context.Context, rpc *tg.RPCClie
 		if err != nil {
 			return totalWritten, fmt.Errorf("download: write: %w", err)
 		}
+		chunkOffset := totalWritten
 		totalWritten += int64(n)
+		st.reset()
+
+		// G10: verify SHA-256 hashes for this chunk if enabled.
+		if opts != nil && opts.VerifyHashes {
+			if hashErr := verifyDownloadChunkHash(ctx, rpc, location, chunkOffset, file.Bytes); hashErr != nil {
+				return totalWritten, hashErr
+			}
+		}
 
 		if opts != nil && opts.Progress != nil {
 			opts.Progress(params.ProgressInfo{
@@ -770,9 +966,17 @@ func (c *Client) downloadToWriterFromOffset(ctx context.Context, rpc *tg.RPCClie
 				IsUpload:        false,
 			})
 		}
-
 		if n < int(chunkSize) || fileSize > 0 && totalWritten >= fileSize {
 			return totalWritten, nil
+		}
+
+		// Pace requests to avoid triggering the DC's rate limiter.
+		if delay := downloadPacingDelay(opts, dcID, c.homeDC()); delay > 0 {
+		select {
+		case <-ctx.Done():
+			return totalWritten, context.Cause(ctx)
+			case <-time.After(delay):
+			}
 		}
 	}
 }
@@ -797,10 +1001,15 @@ func (c *Client) recoverDownloadRPC(ctx context.Context, dcID int, err error) (*
 	if err == nil || !isRecoverableDownloadError(err) {
 		return nil, false, nil
 	}
+	if waitErr := c.waitForDownloadReconnect(ctx); waitErr != nil {
+		return nil, false, fmt.Errorf("download: wait for reconnect: %w", waitErr)
+	}
 	if dcID > 0 {
 		c.dcSessions.remove(dcID)
 	}
-	rpc, dcErr := c.dcRPC(ctx, dcID)
+	rpc, dcErr := c.retryDownloadDCRepair(ctx, func() (*tg.RPCClient, error) {
+		return c.dcRPC(ctx, dcID)
+	})
 	if dcErr != nil {
 		return nil, false, fmt.Errorf("download: reconnect dc %d: %w", dcID, dcErr)
 	}
@@ -811,27 +1020,56 @@ func (c *Client) recoverDownloadWorkerRPC(ctx context.Context, dcID int, poolSiz
 	if err == nil || !isRecoverableDownloadError(err) {
 		return nil, false, nil
 	}
+	if waitErr := c.waitForDownloadReconnect(ctx); waitErr != nil {
+		return nil, false, fmt.Errorf("download: wait for reconnect: %w", waitErr)
+	}
 	// Same-DC (or unknown DC): the main session recovers independently.
 	// Return it directly instead of creating/replacing side sessions.
 	homeDC := c.homeDC()
 	if dcID <= 0 || dcID == homeDC || homeDC == 0 {
 		return c.Raw(), true, nil
 	}
-	rpc, dcErr := c.replaceDCRPCPoolEntry(ctx, dcID, poolSize, workerIdx)
+	rpc, dcErr := c.retryDownloadDCRepair(ctx, func() (*tg.RPCClient, error) {
+		return c.replaceDCRPCPoolEntry(ctx, dcID, poolSize, workerIdx)
+	})
 	if dcErr != nil {
 		return nil, false, fmt.Errorf("download: reconnect dc %d: %w", dcID, dcErr)
 	}
 	return rpc, true, nil
 }
 
+func (c *Client) waitForDownloadReconnect(ctx context.Context) error {
+	if !c.config().ReconnectEnabled {
+		return nil
+	}
+	return c.waitForConnect(ctx)
+}
+
+func (c *Client) retryDownloadDCRepair(ctx context.Context, repair func() (*tg.RPCClient, error)) (*tg.RPCClient, error) {
+	rpc, err := repair()
+	if err == nil || !c.config().ReconnectEnabled ||
+		(!errors.Is(err, ErrNotConnected) && !errors.Is(err, session.ErrNotConnected)) {
+		return rpc, err
+	}
+	if waitErr := c.waitForConnect(ctx); waitErr != nil {
+		return nil, fmt.Errorf("wait for main reconnect: %w", waitErr)
+	}
+	return repair()
+}
+
 func isRecoverableDownloadError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, ErrNotConnected) || errors.Is(err, ErrReconnectFailed) {
+	if errors.Is(err, ErrNotConnected) || errors.Is(err, ErrReconnectFailed) || isTransferSessionDeadErr(err) {
 		return true
 	}
-	if strings.Contains(err.Error(), "session: closed") {
+	// String-based fallback for errors that lose their sentinel chain
+	// through fmt.Errorf %w wrapping in session.Invoke or retrySessionErr.
+	msg := err.Error()
+	if strings.Contains(msg, "session: closed") ||
+		strings.Contains(msg, "not connected") ||
+		strings.Contains(msg, "session closed after") {
 		return true
 	}
 	return false
@@ -871,6 +1109,7 @@ func streamFileRPCWithMigration(ctx context.Context, rpc *tg.RPCClient, location
 		}()
 		offset := int64(0)
 		var totalWritten int64
+		refRetries := 0
 
 		for {
 			select {
@@ -888,6 +1127,15 @@ func streamFileRPCWithMigration(ctx context.Context, rpc *tg.RPCClient, location
 
 			result, err := rpc.UploadGetFile(ctx, req)
 			if err != nil {
+				// G11: automatic file reference refresh on FILE_REFERENCE_EXPIRED.
+				if opts != nil && opts.FileRefresher != nil &&
+					tgerr.Is(err, tgerr.ErrFileReferenceExpired) && refRetries < maxFileRefRetries {
+					if newLoc, refErr := tryRefreshLocationFileRef(ctx, location, opts.FileRefresher); refErr == nil {
+						location = newLoc
+						refRetries++
+						continue
+					}
+				}
 				if migrate != nil {
 					migratedRPC, ok, migrateErr := migrate(totalWritten, err)
 					if migrateErr != nil {
@@ -911,6 +1159,14 @@ func streamFileRPCWithMigration(ctx context.Context, rpc *tg.RPCClient, location
 
 			if len(file.Bytes) == 0 {
 				return
+			}
+
+			// G10: verify SHA-256 hashes for this chunk if enabled.
+			if opts != nil && opts.VerifyHashes {
+				if hashErr := verifyDownloadChunkHash(ctx, rpc, location, offset, file.Bytes); hashErr != nil {
+					sendOrCancel(ctx, ch, FileChunk{Err: hashErr})
+					return
+				}
 			}
 
 			totalWritten += int64(len(file.Bytes))
@@ -949,7 +1205,7 @@ func getMediaFileSize(media types.Media) int64 {
 	}
 }
 
-func (c *Client) downloadCDNToWriter(ctx context.Context, redirect *tg.UploadFileCDNRedirect, fileSize int64, writer io.Writer, opts *params.Download) (int64, error) {
+func (c *Client) downloadCDNToWriter(ctx context.Context, redirect *tg.UploadFileCDNRedirect, startOffset, fileSize int64, writer io.Writer, opts *params.Download) (int64, error) {
 	cdnRPC, err := c.dcRPC(ctx, int(redirect.DCID))
 	if err != nil {
 		return 0, fmt.Errorf("cdn: connect to dc %d: %w", redirect.DCID, err)
@@ -963,7 +1219,8 @@ func (c *Client) downloadCDNToWriter(ctx context.Context, redirect *tg.UploadFil
 
 	hasher := &cdnHashChecker{hashes: redirect.FileHashes}
 	var totalWritten int64
-	offset := int64(0)
+	offset := startOffset
+	reuploadAttempts := 0
 
 	for {
 		select {
@@ -972,10 +1229,22 @@ func (c *Client) downloadCDNToWriter(ctx context.Context, redirect *tg.UploadFil
 		default:
 		}
 
+		coverageEnd, err := hasher.ensureCoverage(ctx, cdnRPC, redirect.FileToken, offset)
+		if err != nil {
+			return totalWritten, err
+		}
+		limit := int64(chunkSize)
+		if available := coverageEnd - offset; available < limit {
+			limit = available
+		}
+		if limit <= 0 {
+			return totalWritten, fmt.Errorf("cdn: no authenticated range at offset %d", offset)
+		}
+
 		req := &tg.UploadGetCDNFileRequest{
 			FileToken: redirect.FileToken,
 			Offset:    offset,
-			Limit:     chunkSize,
+			Limit:     int32(limit),
 		}
 
 		result, err := cdnRPC.UploadGetCDNFile(ctx, req)
@@ -986,6 +1255,10 @@ func (c *Client) downloadCDNToWriter(ctx context.Context, redirect *tg.UploadFil
 		cdnFile, ok := result.(*tg.UploadCDNFile)
 		if !ok {
 			if reupload, ok := result.(*tg.UploadCDNFileReuploadNeeded); ok {
+				reuploadAttempts++
+				if reuploadAttempts > 3 {
+					return totalWritten, fmt.Errorf("cdn: too many reupload attempts at offset %d", offset)
+				}
 				_, reuploadErr := cdnRPC.UploadReuploadCDNFile(ctx, &tg.UploadReuploadCDNFileRequest{
 					FileToken:    redirect.FileToken,
 					RequestToken: reupload.RequestToken,
@@ -996,6 +1269,13 @@ func (c *Client) downloadCDNToWriter(ctx context.Context, redirect *tg.UploadFil
 				continue
 			}
 			return totalWritten, fmt.Errorf("cdn: unexpected result type %T", result)
+		}
+		reuploadAttempts = 0
+		if len(cdnFile.Bytes) == 0 {
+			return totalWritten, fmt.Errorf("cdn: empty response inside authenticated range at offset %d", offset)
+		}
+		if len(cdnFile.Bytes) > int(limit) {
+			return totalWritten, fmt.Errorf("cdn: response at offset %d exceeds requested authenticated range", offset)
 		}
 
 		decrypted, err := cdnDecryptChunk(cdnFile.Bytes, key, iv, offset)
@@ -1015,22 +1295,31 @@ func (c *Client) downloadCDNToWriter(ctx context.Context, redirect *tg.UploadFil
 		if err != nil {
 			return totalWritten, fmt.Errorf("cdn: write: %w", err)
 		}
+		if n != len(decrypted) {
+			return totalWritten, fmt.Errorf("cdn: write: %w", io.ErrShortWrite)
+		}
 		totalWritten += int64(n)
 		offset += int64(len(decrypted))
 
-		if len(cdnFile.Bytes) < int(chunkSize) {
+		if len(cdnFile.Bytes) < int(limit) {
+			if err := hasher.finish(); err != nil {
+				return totalWritten, err
+			}
 			return totalWritten, nil
 		}
 
 		if opts != nil && opts.Progress != nil {
 			opts.Progress(params.ProgressInfo{
 				TotalBytes:      fileSize,
-				DownloadedBytes: totalWritten,
+				DownloadedBytes: startOffset + totalWritten,
 				IsUpload:        false,
 			})
 		}
 
-		if fileSize > 0 && totalWritten >= fileSize {
+		if fileSize > 0 && offset >= fileSize {
+			if err := hasher.finish(); err != nil {
+				return totalWritten, err
+			}
 			return totalWritten, nil
 		}
 	}
@@ -1097,6 +1386,88 @@ type cdnHashChecker struct {
 	hashes []*tg.FileHash
 	idx    int
 	buf    []byte
+}
+
+func (c *cdnHashChecker) ensureCoverage(ctx context.Context, rpc *tg.RPCClient, fileToken []byte, offset int64) (int64, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		for i := c.idx; i < len(c.hashes); i++ {
+			h := c.hashes[i]
+			if h == nil || h.Offset < 0 || h.Limit <= 0 || len(h.Hash) != sha256.Size {
+				return 0, fmt.Errorf("cdn: invalid hash descriptor at index %d", i)
+			}
+		}
+		sort.Slice(c.hashes[c.idx:], func(i, j int) bool {
+			return c.hashes[c.idx+i].Offset < c.hashes[c.idx+j].Offset
+		})
+		end, err := c.coverageEnd(offset)
+		if err != nil {
+			return 0, err
+		}
+		if end > offset {
+			return end, nil
+		}
+
+		result, err := rpc.Invoke(ctx, &tg.UploadGetCDNFileHashesRequest{
+			FileToken: fileToken,
+			Offset:    offset,
+		}, decodeFileHashVector)
+		if err != nil {
+			return 0, fmt.Errorf("cdn: get hashes at offset %d: %w", offset, err)
+		}
+		fhr, ok := result.(*fileHashResult)
+		if !ok || len(fhr.items) == 0 {
+			return 0, fmt.Errorf("cdn: server returned no hashes at offset %d", offset)
+		}
+		c.hashes = append(c.hashes, fhr.items...)
+		sort.Slice(c.hashes[c.idx:], func(i, j int) bool {
+			return c.hashes[c.idx+i].Offset < c.hashes[c.idx+j].Offset
+		})
+	}
+	return 0, fmt.Errorf("cdn: no authenticated range at offset %d", offset)
+}
+
+func (c *cdnHashChecker) coverageEnd(offset int64) (int64, error) {
+	for c.idx < len(c.hashes) {
+		h := c.hashes[c.idx]
+		if h == nil || h.Offset < 0 || h.Limit <= 0 || len(h.Hash) != sha256.Size {
+			return 0, fmt.Errorf("cdn: invalid hash descriptor at index %d", c.idx)
+		}
+		if h.Offset+int64(h.Limit) > offset {
+			break
+		}
+		c.idx++
+	}
+
+	end := offset
+	for i := c.idx; i < len(c.hashes); i++ {
+		h := c.hashes[i]
+		if h == nil || h.Offset < 0 || h.Limit <= 0 || len(h.Hash) != sha256.Size {
+			return 0, fmt.Errorf("cdn: invalid hash descriptor at index %d", i)
+		}
+		hashEnd := h.Offset + int64(h.Limit)
+		if i == c.idx && len(c.buf) != 0 {
+			if h.Offset >= offset || hashEnd <= offset {
+				return 0, fmt.Errorf("cdn: hash range does not cover buffered offset %d", offset)
+			}
+			end = hashEnd
+			continue
+		}
+		if h.Offset > end {
+			break
+		}
+		if h.Offset < end {
+			return 0, fmt.Errorf("cdn: overlapping hash range at offset %d", h.Offset)
+		}
+		end = hashEnd
+	}
+	return end, nil
+}
+
+func (c *cdnHashChecker) finish() error {
+	if len(c.buf) != 0 {
+		return fmt.Errorf("cdn: incomplete authenticated range (%d buffered bytes)", len(c.buf))
+	}
+	return nil
 }
 
 // feed offers the decrypted bytes covering absolute range [base, base+len(data))
@@ -1170,6 +1541,134 @@ func cdnVerifyHash(data []byte, hash *tg.FileHash, baseOffset int64) bool {
 	chunk := data[start:end]
 	computed := sha256.Sum256(chunk)
 	return bytes.Equal(computed[:], hash.Hash)
+}
+
+// fileHashResult wraps the []*FileHash vector returned by upload.getFileHashes.
+// The generated UploadGetFileHashes method uses ReadTLObject which returns an
+// empty Vector for bare vectors, so we provide a custom decoder.
+type fileHashResult struct {
+	items []*tg.FileHash
+}
+
+func (*fileHashResult) ConstructorID() uint32        { return tg.VectorTypeID }
+func (*fileHashResult) Encode(_ *bytes.Buffer) error { return nil }
+
+// decodeFileHashVector decodes a bare TL vector<fileHash> response from
+// upload.getFileHashes.
+func decodeFileHashVector(r *tg.Reader) (tg.TLObject, error) {
+	hdr, err := r.ReadUint32()
+	if err != nil {
+		return nil, err
+	}
+	if hdr != tg.VectorTypeID {
+		return nil, fmt.Errorf("download: expected fileHash vector, got constructor 0x%x", hdr)
+	}
+	count, err := r.ReadUint32()
+	if err != nil {
+		return nil, err
+	}
+	if err := tg.CheckVectorCount(count); err != nil {
+		return nil, err
+	}
+	hashes := make([]*tg.FileHash, count)
+	for i := range hashes {
+		h, err := tg.DecodeFileHash(r)
+		if err != nil {
+			return nil, err
+		}
+		hashes[i] = h
+	}
+	return &fileHashResult{items: hashes}, nil
+}
+
+// verifyDownloadChunkHash calls upload.getFileHashes for the given offset and
+// verifies each returned hash against the chunk data. Hashes that extend
+// beyond the chunk boundary are skipped (they will be verified in a later
+// chunk or not at all if this is the last chunk). Returns nil if the server
+// returns no hashes or an error (verification is silently skipped), or an
+// error if any hash mismatches.
+func verifyDownloadChunkHash(ctx context.Context, rpc *tg.RPCClient, location tg.InputFileLocationClass, offset int64, data []byte) error {
+	result, err := rpc.Invoke(ctx, &tg.UploadGetFileHashesRequest{
+		Location: location,
+		Offset:   offset,
+	}, decodeFileHashVector)
+	if err != nil {
+		return nil // server may not support — skip verification
+	}
+	fhr, ok := result.(*fileHashResult)
+	if !ok || len(fhr.items) == 0 {
+		return nil
+	}
+	for _, h := range fhr.items {
+		if h == nil || h.Offset < offset {
+			continue
+		}
+		start := h.Offset - offset
+		end := start + int64(h.Limit)
+		if end > int64(len(data)) {
+			continue // extends beyond this chunk
+		}
+		chunk := data[start:end]
+		computed := sha256.Sum256(chunk)
+		if !bytes.Equal(computed[:], h.Hash) {
+			return fmt.Errorf("download: hash verification failed at offset %d", h.Offset)
+		}
+	}
+	return nil
+}
+
+// locationDocID extracts the document or photo ID from an InputFileLocation,
+// used as the key for file reference refresh lookups.
+func locationDocID(location tg.InputFileLocationClass) int64 {
+	switch loc := location.(type) {
+	case *tg.InputDocumentFileLocation:
+		return loc.ID
+	case *tg.InputPhotoFileLocation:
+		return loc.ID
+	default:
+		return 0
+	}
+}
+
+// updateLocationFileRef returns a copy of location with its FileReference
+// replaced by fileRef. Returns an error for unsupported location types.
+func updateLocationFileRef(location tg.InputFileLocationClass, fileRef []byte) (tg.InputFileLocationClass, error) {
+	switch loc := location.(type) {
+	case *tg.InputDocumentFileLocation:
+		return &tg.InputDocumentFileLocation{
+			ID:            loc.ID,
+			AccessHash:    loc.AccessHash,
+			FileReference: fileRef,
+			ThumbSize:     loc.ThumbSize,
+		}, nil
+	case *tg.InputPhotoFileLocation:
+		return &tg.InputPhotoFileLocation{
+			ID:            loc.ID,
+			AccessHash:    loc.AccessHash,
+			FileReference: fileRef,
+			ThumbSize:     loc.ThumbSize,
+		}, nil
+	default:
+		return nil, fmt.Errorf("download: unsupported location type %T for file reference refresh", location)
+	}
+}
+
+// tryRefreshLocationFileRef attempts to refresh the file reference for the
+// given location using the provided refresher. Returns the updated location
+// on success, or an error if refresh fails.
+func tryRefreshLocationFileRef(ctx context.Context, location tg.InputFileLocationClass, refresher params.FileRefresher) (tg.InputFileLocationClass, error) {
+	docID := locationDocID(location)
+	if docID == 0 {
+		return nil, fmt.Errorf("download: cannot extract document ID from location %T", location)
+	}
+	newRef, err := refresher.RefreshFileReference(ctx, docID)
+	if err != nil {
+		return nil, fmt.Errorf("download: refresh file reference: %w", err)
+	}
+	if len(newRef) == 0 {
+		return nil, fmt.Errorf("download: refreshed file reference is empty")
+	}
+	return updateLocationFileRef(location, newRef)
 }
 
 func incrementIV(iv []byte) {
@@ -1311,7 +1810,7 @@ func sanitizeFileName(name string) string {
 }
 
 func (c *Client) downloadToPath(ctx context.Context, input any, filePath string, progress params.ProgressFunc) (string, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return "", err
 	}
 
@@ -1356,7 +1855,7 @@ func (c *Client) downloadToPath(ctx context.Context, input any, filePath string,
 }
 
 func (c *Client) downloadBytes(ctx context.Context, input any, progress params.ProgressFunc) ([]byte, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1424,7 +1923,7 @@ type StreamChunk struct {
 //   - input: *types.Message or types.Media to stream
 //   - opts: optional download settings (chunk size). May be nil for defaults.
 func (c *Client) StreamMedia(ctx context.Context, input any, opts *params.Download) (<-chan StreamChunk, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 

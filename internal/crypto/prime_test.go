@@ -36,6 +36,14 @@ func TestDecomposeEven(t *testing.T) {
 	}
 }
 
+func TestDecomposeRejectsInvalidInput(t *testing.T) {
+	for _, pq := range []int64{-1, 0, 1, 2, 3} {
+		if got := Decompose(pq); got != 0 {
+			t.Fatalf("Decompose(%d) = %d, want 0", pq, got)
+		}
+	}
+}
+
 func TestDecomposeLarge(t *testing.T) {
 	p, q := int64(104729), int64(104743)
 	pq := p * q
@@ -46,16 +54,16 @@ func TestDecomposeLarge(t *testing.T) {
 }
 
 func TestCurrentDHPrime(t *testing.T) {
-	if CurrentDHPrime.Sign() <= 0 {
+	if currentDHPrime.Sign() <= 0 {
 		t.Fatal("CurrentDHPrime must be positive")
 	}
-	if CurrentDHPrime.BitLen() != 2048 {
-		t.Fatalf("CurrentDHPrime bit length: got %d, want 2048", CurrentDHPrime.BitLen())
+	if currentDHPrime.BitLen() != 2048 {
+		t.Fatalf("CurrentDHPrime bit length: got %d, want 2048", currentDHPrime.BitLen())
 	}
 }
 
 func TestCurrentDHPrimeIsPrime(t *testing.T) {
-	if !CurrentDHPrime.ProbablyPrime(64) {
+	if !currentDHPrime.ProbablyPrime(64) {
 		t.Fatal("CurrentDHPrime is not prime")
 	}
 }

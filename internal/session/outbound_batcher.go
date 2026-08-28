@@ -3,6 +3,8 @@ package session
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,16 +18,15 @@ type batchItem struct {
 	msgID   int64
 	seqNo   uint32
 	body    tg.TLObject
+	bodyRaw []byte
 	handle  *CallHandle
 	timeout time.Duration
 }
 
 // OutboundBatcher coalesces multiple outbound RPCs into MTProto msg_container
-// messages using adaptive flushing. When enabled, the Session's Send method
-// delegates to Submit, which registers a pending handle and queues the item.
-// A flush goroutine drains queued items: a single item flushes immediately
-// (zero added latency); multiple items are packed into a single container and
-// sent as one encrypted message.
+// messages using a bounded coalescing window. When enabled, the Session's Send
+// method delegates low-priority work to Submit, which registers a pending
+// handle and queues the item. High-priority work bypasses the batcher.
 //
 // Ported conceptually from TDLib net/Session.h outbound container packing.
 type OutboundBatcher struct {
@@ -53,8 +54,8 @@ func NewOutboundBatcher(s *Session, maxContainerBytes int, coalesceWindow time.D
 	if maxContainerBytes <= 0 {
 		maxContainerBytes = 1 << 20 // 1 MiB
 	}
-	if coalesceWindow <= 0 {
-		coalesceWindow = time.Millisecond
+	if coalesceWindow == 0 {
+		coalesceWindow = 10 * time.Millisecond
 	}
 	return &OutboundBatcher{
 		session:           s,
@@ -80,15 +81,31 @@ func (b *OutboundBatcher) Submit(ctx context.Context, msgID int64, seqNo uint32,
 		return nil, err
 	}
 
+	bodyRaw, err := encodeBuf(body)
+	if err != nil {
+		b.session.pending.Cancel(msgID)
+		return nil, fmt.Errorf("session: encode batched message: %w", err)
+	}
+	handle.StoreResendMessage(seqNo, bodyRaw)
+
 	item := batchItem{
 		msgID:   msgID,
 		seqNo:   seqNo,
 		body:    body,
+		bodyRaw: bodyRaw,
 		handle:  handle,
 		timeout: timeout,
 	}
 
 	b.mu.Lock()
+	// Reject items after Close to prevent leaking pending handles (#5).
+	select {
+	case <-b.done:
+		b.mu.Unlock()
+		b.session.pending.Cancel(msgID)
+		return nil, ErrBatcherClosed
+	default:
+	}
 	if priority == PriorityHigh {
 		b.high = append(b.high, item)
 	} else {
@@ -150,7 +167,6 @@ func (b *OutboundBatcher) flush() {
 	// Build MTProtoMessages for each item.
 	msgs := make([]*tg.MTProtoMessage, 0, len(items))
 	totalSize := 0
-	pendingItems := items[:0] // reuse for items we actually pack
 	for _, item := range items {
 		if item.handle == nil {
 			continue
@@ -160,17 +176,15 @@ func (b *OutboundBatcher) flush() {
 			SeqNo: item.seqNo,
 			Body:  item.body,
 		}
-		// Estimate serialized size (rough: encode and measure).
-		msgBuf := encodeBuf(msg)
-		if totalSize+len(msgBuf) > b.maxContainerBytes && len(msgs) > 0 {
+		messageSize := 16 + len(item.bodyRaw)
+		if totalSize+messageSize > b.maxContainerBytes && len(msgs) > 0 {
 			// Flush what we have, start a new container.
 			b.packAndSend(msgs)
 			msgs = msgs[:0]
 			totalSize = 0
 		}
 		msgs = append(msgs, msg)
-		totalSize += len(msgBuf)
-		pendingItems = append(pendingItems, item)
+		totalSize += messageSize
 	}
 
 	if len(msgs) > 0 {
@@ -194,20 +208,33 @@ func (b *OutboundBatcher) packAndSend(msgs []*tg.MTProtoMessage) {
 	}
 
 	var outerBody tg.TLObject
+	var msgID int64
+	var seqNo uint32
+
 	if len(msgs) == 1 {
+		// Single-message path: use the child's own msgID/seqNo directly (#1).
+		// The server's rpc_result references this msgID, and the pending handle
+		// was registered under it.
 		outerBody = msgs[0].Body
+		msgID = msgs[0].MsgID
+		seqNo = msgs[0].SeqNo
 	} else {
+		// Container path: allocate a container-level msgID.
 		outerBody = &tg.MsgContainer{Messages: msgs}
+		msgID = s.msgFactory.AllocateMsgID()
+		seqNo = uint32(s.msgFactory.AllocateSeqNo(false))
+
+		// Track container→child mapping for bad_msg rejection (#3).
+		childIDs := make([]int64, len(msgs))
+		for i, m := range msgs {
+			childIDs[i] = m.MsgID
+		}
+		s.containerTracker.TrackContainer(msgID, childIDs)
 	}
 
-	// Allocate a container-level msgID (content=false for the container itself
-	// since it wraps content messages).
-	containerMsgID := s.msgFactory.AllocateMsgID()
-	containerSeqNo := uint32(s.msgFactory.AllocateSeqNo(false))
-
 	message := &tg.MTProtoMessage{
-		MsgID: containerMsgID,
-		SeqNo: containerSeqNo,
+		MsgID: msgID,
+		SeqNo: seqNo,
 		Body:  outerBody,
 	}
 
@@ -222,7 +249,7 @@ func (b *OutboundBatcher) packAndSend(msgs []*tg.MTProtoMessage) {
 
 	if err := s.writeEncrypted(context.Background(), encrypted, 10*time.Second); err != nil {
 		for _, msg := range msgs {
-			s.pending.Cancel(msg.MsgID)
+			s.pending.Reject(msg.MsgID, fmt.Errorf("session: write batched message: %w", err))
 		}
 		return
 	}
@@ -251,20 +278,33 @@ func (b *OutboundBatcher) Snapshot() OutboundSnapshot {
 	}
 }
 
+// ErrBatcherClosed is returned when Submit is called after Close.
+var ErrBatcherClosed = errors.New("session: outbound batcher is closed")
+
 // Close stops the flush goroutine. Pending items are NOT flushed (the caller
 // should drain before closing). Idempotent.
+
 func (b *OutboundBatcher) Close() error {
 	close(b.done)
 	b.wg.Wait()
 	return nil
 }
 
-// encodeBuf serializes a TLObject to measure its wire size. Returns a nil slice
-// on error (the item is still packed; size tracking is best-effort).
-func encodeBuf(obj tg.TLObject) []byte {
-	var buf bytes.Buffer
-	if err := obj.Encode(&buf); err != nil {
-		return nil
+// encodeBufPool recycles bytes.Buffer allocations across TL-object
+// serialization calls in the hot path (InvokeRaw, OutboundBatcher.Submit).
+var encodeBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
+func encodeBuf(obj tg.TLObject) ([]byte, error) {
+	buf := encodeBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer encodeBufPool.Put(buf)
+
+	if err := obj.Encode(buf); err != nil {
+		return nil, err
 	}
-	return buf.Bytes()
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	return out, nil
 }

@@ -4,7 +4,9 @@
 package params
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	tl "github.com/mtgo-labs/mtgo/tg"
 )
@@ -125,6 +127,7 @@ type EditMessage struct {
 	ReplyMarkup           tl.ReplyMarkupClass
 	ParseMode             ParseMode
 	Entities              []tl.MessageEntityClass
+	Caption               string
 	ScheduleDate          *int32
 	ShowCaptionAboveMedia bool
 	BusinessConnectionID  string
@@ -293,6 +296,44 @@ type Download struct {
 	// DCID specifies the data-center ID to download from. A value of 0
 	// lets the client automatically resolve the correct data center.
 	DCID int32
+
+	// VerifyHashes enables SHA-256 hash verification for each downloaded
+	// chunk. When enabled, the client calls upload.getFileHashes after
+	// receiving each chunk and verifies the data against server-provided
+	// hashes. If the server does not support file hashes or returns none,
+	// verification is silently skipped.
+	VerifyHashes bool
+
+	// FileRefresher is used to automatically refresh expired file references
+	// during download. When FILE_REFERENCE_EXPIRED is received, the refresher
+	// is called to fetch a new reference and the download retries. Nil
+	// disables automatic refresh.
+	FileRefresher FileRefresher
+
+	// RequestDelay sets a delay applied between consecutive chunk requests
+	// during download. This paces requests to avoid triggering Telegram's
+	// per-DC rate limiter, which forcefully disconnects sessions that request
+	// too aggressively. A value of 0 lets the client choose a sensible
+	// default based on whether the download is cross-DC. Set to a negative
+	// value to disable pacing entirely.
+	RequestDelay time.Duration
+
+	// StallTimeout aborts the download if no data chunk is received within
+	// this duration. The timer resets on each successful chunk, so only
+	// genuine stalls (server hangs, repeated FLOOD_WAIT, -503 Timeout)
+	// trigger the abort. A value of 0 disables stall detection (default).
+	// Useful for bulk downloads where some files may be unavailable and
+	// would otherwise hang indefinitely.
+	StallTimeout time.Duration
+}
+
+// FileRefresher refreshes expired file references by re-fetching the source
+// object (e.g., a message containing the document).
+type FileRefresher interface {
+	// RefreshFileReference returns a fresh file reference for the given
+	// document or photo ID. Returns an error if the refresh fails or the
+	// origin is unknown.
+	RefreshFileReference(ctx context.Context, id int64) ([]byte, error)
 }
 
 // GetGifts holds options for the payments.getSavedStarGifts API call.
@@ -582,8 +623,8 @@ type SendChecklist struct {
 	MessageThreadID      int32
 }
 
-func (s *SendChecklist) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendChecklist) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendChecklist) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -619,13 +660,20 @@ type SendInlineBotResult struct {
 	MessageThreadID      int32
 }
 
+// parseModeProvider is optionally implemented by Send* types that carry ParseMode
+// and CaptionEntities. flatToSendMsg copies them into the resulting SendMessage
+// so that sendMediaInternal can use them for caption formatting.
+type parseModeProvider interface {
+	getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass)
+}
+
 func flatToSendMsg(s interface {
-	getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass)
+	getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32)
 },
 ) *SendMessage {
 	disableNotification, silent, background, clearDraft, noForwards,
-		replyToMessageID, replyTo, replyMarkup, scheduleDate, effectID, sendAs := s.getFlatSendFields()
-	return &SendMessage{
+		replyToMessageID, replyTo, replyMarkup, scheduleDate, effectID, sendAs, messageThreadID := s.getFlatSendFields()
+	sm := &SendMessage{
 		DisableNotification: disableNotification,
 		Silent:              silent,
 		Background:          background,
@@ -637,46 +685,51 @@ func flatToSendMsg(s interface {
 		ScheduleDate:        scheduleDate,
 		EffectID:            effectID,
 		SendAs:              sendAs,
+		MessageThreadID:     messageThreadID,
 	}
+	if p, ok := s.(parseModeProvider); ok {
+		sm.ParseMode, sm.Entities = p.getParseModeAndEntities()
+	}
+	return sm
 }
 
-func (s *SendPoll) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendPoll) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendPoll) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
-func (s *SendVenue) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendVenue) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendVenue) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
-func (s *SendContact) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendContact) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendContact) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
-func (s *SendLocation) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendLocation) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendLocation) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
-func (s *SendDice) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendDice) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendDice) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
-func (s *SendGame) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendGame) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendGame) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
-func (s *SendMediaGroup) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, nil, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendMediaGroup) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, nil, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendMediaGroup) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
-func (s *SendInlineBotResult) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendInlineBotResult) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendInlineBotResult) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -738,8 +791,12 @@ type SendAudio struct {
 	RepeatPeriod          *int32
 }
 
-func (s *SendAudio) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendAudio) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
+
+func (s *SendAudio) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendAudio) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -792,8 +849,12 @@ type SendVideo struct {
 	VideoCover            tl.InputDocumentClass
 }
 
-func (s *SendVideo) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendVideo) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
+
+func (s *SendVideo) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendVideo) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -836,8 +897,12 @@ type SendDocument struct {
 	RepeatPeriod          *int32
 }
 
-func (s *SendDocument) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendDocument) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
+
+func (s *SendDocument) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendDocument) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -873,15 +938,19 @@ type SendPhoto struct {
 	TTLSeconds            *int32
 	ViewOnce              bool
 	ShowCaptionAboveMedia bool
+
 	BusinessConnectionID  string
 	AllowPaidBroadcast    bool
 	PaidMessageStarCount  *int64
 	MessageThreadID       int32
 	RepeatPeriod          *int32
 }
+func (s *SendPhoto) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
 
-func (s *SendPhoto) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendPhoto) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendPhoto) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -922,15 +991,19 @@ type SendAnimation struct {
 	Height                int32
 	Unsave                bool
 	ShowCaptionAboveMedia bool
+
 	BusinessConnectionID  string
 	AllowPaidBroadcast    bool
 	PaidMessageStarCount  *int64
 	MessageThreadID       int32
 	RepeatPeriod          *int32
 }
+func (s *SendAnimation) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
 
-func (s *SendAnimation) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendAnimation) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendAnimation) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -964,15 +1037,19 @@ type SendVoice struct {
 	CaptionEntities       []tl.MessageEntityClass
 	ViewOnce              bool
 	ShowCaptionAboveMedia bool
+
 	BusinessConnectionID  string
 	AllowPaidBroadcast    bool
 	PaidMessageStarCount  *int64
 	MessageThreadID       int32
 	RepeatPeriod          *int32
 }
+func (s *SendVoice) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
 
-func (s *SendVoice) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendVoice) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendVoice) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -1013,8 +1090,8 @@ type SendVideoNote struct {
 	RepeatPeriod         *int32
 }
 
-func (s *SendVideoNote) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendVideoNote) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendVideoNote) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 
@@ -1053,8 +1130,12 @@ type SendSticker struct {
 	RepeatPeriod         *int32
 }
 
-func (s *SendSticker) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass) {
-	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs
+func (s *SendSticker) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
+	return s.ParseMode, s.CaptionEntities
+}
+
+func (s *SendSticker) getFlatSendFields() (bool, bool, bool, bool, bool, int32, tl.InputReplyToClass, tl.ReplyMarkupClass, *int32, *int64, tl.InputPeerClass, int32) {
+	return s.DisableNotification, s.Silent, s.Background, s.ClearDraft, s.NoForwards, s.ReplyToMessageID, s.ReplyTo, s.ReplyMarkup, s.ScheduleDate, s.EffectID, s.SendAs, s.MessageThreadID
 }
 func (s *SendSticker) ToSendMsg() *SendMessage { return flatToSendMsg(s) }
 

@@ -103,12 +103,17 @@ type UploadResult struct {
 //	}
 //	fmt.Printf("Uploaded %d bytes\n", result.Size)
 func (c *Client) UploadFile(ctx context.Context, reader io.Reader, fileName string, fileSize int64, opts *UploadOptions) (*UploadResult, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
+	ctx = withTransferRetry(ctx)
 	c.Log.Debugf("UploadFile size=%d", fileSize)
-	rpc := c.uploadRPC()
-	inputFile, actualSize, err := uploadFileRPC(ctx, rpc, reader, fileName, fileSize, opts)
+	rpcs, err := c.uploadRPCs(ctx, fileSize)
+	if err != nil {
+		return nil, err
+	}
+	c.Log.Debugf("UploadFile size=%d pool=%d", fileSize, len(rpcs))
+	inputFile, actualSize, err := uploadFileRPC(ctx, rpcs, reader, fileName, fileSize, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +131,7 @@ func (c *Client) UploadFile(ctx context.Context, reader io.Reader, fileName stri
 	}, nil
 }
 
-func uploadFileRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reader, fileName string, fileSize int64, opts *UploadOptions) (tg.InputFileClass, int64, error) {
+func uploadFileRPC(ctx context.Context, rpcs []*tg.RPCClient, reader io.Reader, fileName string, fileSize int64, opts *UploadOptions) (tg.InputFileClass, int64, error) {
 	if fileSize < 0 {
 		return nil, 0, fmt.Errorf("upload: file size must be non-negative, got %d", fileSize)
 	}
@@ -134,9 +139,9 @@ func uploadFileRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reader, fil
 		return nil, 0, fmt.Errorf("upload: file size %d exceeds maximum %d", fileSize, maxFileSize)
 	}
 	if fileSize == 0 {
-		return uploadFileStreamRPC(ctx, rpc, reader, fileName, opts)
+		return uploadFileStreamRPC(ctx, rpcs[0], reader, fileName, opts)
 	}
-	return uploadFileKnownRPC(ctx, rpc, reader, fileName, fileSize, opts)
+	return uploadFileKnownRPC(ctx, rpcs, reader, fileName, fileSize, opts)
 }
 
 func uploadFileStreamRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reader, fileName string, opts *UploadOptions) (tg.InputFileClass, int64, error) {
@@ -306,7 +311,7 @@ func uploadFileStreamRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reade
 	}, totalStreamSize, nil
 }
 
-func uploadFileKnownRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reader, fileName string, fileSize int64, opts *UploadOptions) (tg.InputFileClass, int64, error) {
+func uploadFileKnownRPC(ctx context.Context, rpcs []*tg.RPCClient, reader io.Reader, fileName string, fileSize int64, opts *UploadOptions) (tg.InputFileClass, int64, error) {
 	workers := uploadKnownWorkers(opts, fileSize)
 
 	fileID, err := generateFileID()
@@ -341,8 +346,10 @@ func uploadFileKnownRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reader
 	var hasErr atomic.Bool
 	var uploadedBytes atomic.Int64
 	var progressMu sync.Mutex
+	limiter := newByteLimiter(defaultUploadByteLimit)
 
-	for w := 0; w < workers; w++ {
+	for range workers {
+		rpc := rpcs[0]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -366,8 +373,18 @@ func uploadFileKnownRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reader
 					continue
 				default:
 				}
+				// Byte-based in-flight limiter: caps total concurrent upload
+				// data at 4MB (matching mtcute/TDLib), preventing server overload.
+				if err := limiter.acquire(ctx, int64(len(job.data))); err != nil {
+					uploadBufPool.Put(job.bufPtr)
+					results <- partResult{index: job.partIdx, err: err}
+					hasErr.Store(true)
+					continue
+				}
 
 				var uploadErr error
+				// The pool invoker handles round-robin, dead-session replacement,
+				// and fallback to main session. Workers just call the RPC.
 				partCtx, partCancel := context.WithTimeout(ctx, uploadPartTimeout)
 				if isBig {
 					_, uploadErr = rpc.UploadSaveBigFilePart(partCtx, &tg.UploadSaveBigFilePartRequest{
@@ -384,6 +401,8 @@ func uploadFileKnownRPC(ctx context.Context, rpc *tg.RPCClient, reader io.Reader
 					})
 				}
 				partCancel()
+
+				limiter.release(int64(len(job.data)))
 
 				uploadBufPool.Put(job.bufPtr)
 
@@ -567,7 +586,7 @@ func generateFileID() (int64, error) {
 //	}
 //	fmt.Printf("Photo sent, message ID: %d\n", msg.ID)
 func (c *Client) SendPhoto(ctx context.Context, chatID int64, file *InputFile, caption string, opts ...*params.SendPhoto) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendPhoto{}, opts...)
@@ -582,7 +601,7 @@ func (c *Client) SendPhoto(ctx context.Context, chatID int64, file *InputFile, c
 }
 
 func (c *Client) SendDocument(ctx context.Context, chatID int64, file *InputFile, caption string, opts ...*params.SendDocument) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendDocument{}, opts...)
@@ -605,7 +624,7 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, file *InputFile
 }
 
 func (c *Client) SendVideo(ctx context.Context, chatID int64, file *InputFile, caption string, opts ...*params.SendVideo) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendVideo{}, opts...)
@@ -625,7 +644,7 @@ func (c *Client) SendVideo(ctx context.Context, chatID int64, file *InputFile, c
 }
 
 func (c *Client) SendAudio(ctx context.Context, chatID int64, file *InputFile, caption string, opts ...*params.SendAudio) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendAudio{}, opts...)
@@ -644,7 +663,7 @@ func (c *Client) SendAudio(ctx context.Context, chatID int64, file *InputFile, c
 }
 
 func (c *Client) SendAnimation(ctx context.Context, chatID int64, file *InputFile, caption string, opts ...*params.SendAnimation) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendAnimation{}, opts...)
@@ -659,7 +678,7 @@ func (c *Client) SendAnimation(ctx context.Context, chatID int64, file *InputFil
 }
 
 func (c *Client) SendVoice(ctx context.Context, chatID int64, file *InputFile, caption string, opts ...*params.SendVoice) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendVoice{}, opts...)
@@ -674,7 +693,7 @@ func (c *Client) SendVoice(ctx context.Context, chatID int64, file *InputFile, c
 }
 
 func (c *Client) SendVideoNote(ctx context.Context, chatID int64, file *InputFile, opts ...*params.SendVideoNote) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendVideoNote{}, opts...)
@@ -689,7 +708,7 @@ func (c *Client) SendVideoNote(ctx context.Context, chatID int64, file *InputFil
 }
 
 func (c *Client) SendSticker(ctx context.Context, chatID int64, file *InputFile, opts ...*params.SendSticker) (*types.Message, error) {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnectedContext(ctx); err != nil {
 		return nil, err
 	}
 	opt := params.GetOptDef(&params.SendSticker{}, opts...)

@@ -79,6 +79,27 @@ func TestRegisterAndResolveRaw(t *testing.T) {
 	}
 }
 
+func TestResolveRPCResultTransfersRawPayloadOwnership(t *testing.T) {
+	pm := NewPendingManager()
+	h, err := pm.Register(3, true)
+	if err != nil {
+		t.Fatalf("Register() error: %v", err)
+	}
+
+	payload := []byte{1, 2, 3}
+	if decoded := pm.ResolveRPCResult(3, payload); decoded {
+		t.Fatal("raw result should not request decoded handling")
+	}
+	<-h.Done()
+	_, raw, err := h.Result()
+	if err != nil {
+		t.Fatalf("Result() error: %v", err)
+	}
+	if len(raw) == 0 || &raw[0] != &payload[0] {
+		t.Fatal("raw payload was copied instead of transferred")
+	}
+}
+
 func TestReject(t *testing.T) {
 	pm := NewPendingManager()
 	h, err := pm.Register(3, false)
@@ -184,12 +205,15 @@ func TestOneShotCompletion(t *testing.T) {
 func TestHasHasRawHasAny(t *testing.T) {
 	pm := NewPendingManager()
 
-	if pm.HasAny() || pm.HasAnyRaw() {
+	if pm.HasAny() || pm.HasAnyRaw() || pm.HasAnyDecoded() {
 		t.Fatal("empty manager should report false")
 	}
 
 	pm.Register(1, false)
 	pm.Register(2, true)
+	if !pm.HasAnyDecoded() {
+		t.Fatal("decoded pending call was not reported")
+	}
 
 	if !pm.Has(1) || !pm.Has(2) {
 		t.Fatal("both should be present")
@@ -207,6 +231,9 @@ func TestHasHasRawHasAny(t *testing.T) {
 	}
 	if !pm.Has(2) {
 		t.Fatal("msgID 2 should still be present")
+	}
+	if pm.HasAnyDecoded() {
+		t.Fatal("raw-only pending calls should not require decoding")
 	}
 }
 

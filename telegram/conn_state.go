@@ -107,19 +107,25 @@ func (cs *connStateManager) State() ConnState {
 
 func (cs *connStateManager) Health() HealthStatus {
 	cs.mu.RLock()
+	state := cs.state
+	dc := cs.currentDC
+	reconnectCount := cs.reconnectCount
+	lastErr := cs.lastErr
+	connectedSince := cs.connectedSince
+	cs.mu.RUnlock()
+
 	cs.tsMu.Lock()
 	defer cs.tsMu.Unlock()
-	defer cs.mu.RUnlock()
 	return HealthStatus{
-		State:          cs.state,
-		CurrentDC:      cs.currentDC,
+		State:          state,
+		CurrentDC:      dc,
 		LastReadTime:   cs.lastRead,
 		LastWriteTime:  cs.lastWrite,
 		LastPingTime:   cs.lastPing,
 		LastPongTime:   cs.lastPong,
-		ReconnectCount: cs.reconnectCount,
-		LastError:      cs.lastErr,
-		ConnectedSince: cs.connectedSince,
+		ReconnectCount: reconnectCount,
+		LastError:      lastErr,
+		ConnectedSince: connectedSince,
 	}
 }
 
@@ -138,11 +144,22 @@ func (cs *connStateManager) SetConnecting(dcID int) error {
 }
 
 func (cs *connStateManager) SetConnected() {
+	cs.trySetConnected()
+}
+
+// trySetConnected publishes a successful connection unless Close has already
+// made the client terminal. It prevents an in-flight dial from reviving a
+// closed client after Close starts waiting for lifecycle ownership.
+func (cs *connStateManager) trySetConnected() bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	if cs.state == ConnStateClosed {
+		return false
+	}
 	cs.state = ConnStateConnected
 	cs.connectedSince = time.Now()
 	cs.lastErr = nil
+	return true
 }
 
 func (cs *connStateManager) SetReconnecting(err error) {

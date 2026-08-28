@@ -32,6 +32,21 @@ type mockDownloadInvoker struct {
 	maxActive   atomic.Int32
 }
 
+type transferRetryDownloadInvoker struct {
+	client *Client
+}
+
+func (m *transferRetryDownloadInvoker) RPCInvoke(ctx context.Context, _ tg.TLObject, _ func(*tg.Reader) (tg.TLObject, error)) (tg.TLObject, error) {
+	if !m.client.retryRPCOnReconnect(ctx) {
+		return nil, errors.New("download context does not enable reconnect retry")
+	}
+	return &tg.UploadFile{Bytes: []byte("ok")}, nil
+}
+
+func (m *transferRetryDownloadInvoker) RPCInvokeRaw(context.Context, tg.TLObject) ([]byte, error) {
+	return nil, errors.New("unexpected raw invoke")
+}
+
 func newMockDownloadInvoker(data []byte) *mockDownloadInvoker {
 	return &mockDownloadInvoker{
 		data:       data,
@@ -292,7 +307,9 @@ func TestDownloadToWriterRetriesFileMigrate(t *testing.T) {
 
 	primary := &mockDownloadInvoker{err: tgerr.New(303, "FILE_MIGRATE_4")}
 	migrated := newMockDownloadInvoker(data)
-	c.dcSessions.put(4, &dcSessionEntry{rpc: tg.NewRPCClient(migrated)})
+	if !c.dcSessions.putIfGeneration(4, &dcSessionEntry{rpc: tg.NewRPCClient(migrated)}, 0) {
+		t.Fatal("failed to seed DC session")
+	}
 
 	var buf bytes.Buffer
 	written, err := c.downloadToWriter(
@@ -367,10 +384,18 @@ func TestIsRecoverableDownloadError(t *testing.T) {
 		{"nil", nil, false},
 		{"unrelated", errors.New("io: unexpected EOF"), false},
 		{"not connected", ErrNotConnected, true},
+		{"send timeout", fmt.Errorf("invoke upload.getFile: %w", session.ErrSendTimeout), true},
+		{"auth key unregistered", fmt.Errorf("invoke upload.getFile: %w", tgerr.New(401, "AUTH_KEY_UNREGISTERED")), true},
 		{"bare session closed", errors.New("send: session: closed"), true},
-		{"wrapped session closed",
-			errors.New("download: get file at offset 0: invoke *tg.UploadGetFileRequest(cid=be5335be): retries exhausted (2): invoke *tg.UploadGetFileRequest(cid=be5335be): send: session: closed"),
-			true},
+		{
+			"wrapped session closed",
+			errors.New("download: get file at offset 0: retries exhausted (2): send: session: closed"),
+			true,
+		},
+		{"session not connected", fmt.Errorf("send: %w", session.ErrNotConnected), true},
+		{"wrapped client not connected", fmt.Errorf("download: get file at offset 727711744: %w", ErrNotConnected), true},
+		{"reconnect retries exhausted", errors.New("session closed after 3 reconnect retries: session: closed"), true},
+		{"delivery error not connected", &session.DeliveryError{State: session.DeliveryUnknown, Err: session.ErrNotConnected}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -387,9 +412,11 @@ func TestRecoverDownloadRPC_EvictsDeadCrossDCSession(t *testing.T) {
 	c.state.SetDC(2) // home DC 2 → DC 4 is cross-DC
 
 	// Pre-seed a dead cross-DC session.
-	c.dcSessions.put(4, &dcSessionEntry{
+	if !c.dcSessions.putIfGeneration(4, &dcSessionEntry{
 		rpc: tg.NewRPCClient(&mockDownloadInvoker{err: errors.New("send: session: closed")}),
-	})
+	}, 0) {
+		t.Fatal("failed to seed DC session")
+	}
 	if _, ok := c.dcSessions.get(4); !ok {
 		t.Fatal("pre-seeded DC session not in cache")
 	}
@@ -397,8 +424,8 @@ func TestRecoverDownloadRPC_EvictsDeadCrossDCSession(t *testing.T) {
 	// Recreation fails fast (no network in unit tests).
 	c.testDialer = transport.Dialer(failingDialer{})
 
-	// The exact error the user reported.
-	downloadErr := errors.New("download: get file at offset 0: invoke *tg.UploadGetFileRequest(cid=be5335be): retries exhausted (2): invoke *tg.UploadGetFileRequest(cid=be5335be): send: session: closed")
+	// The error the user reported (new clean format: no Go type leak, no invoke prefix).
+	downloadErr := errors.New("download: get file at offset 0: retries exhausted (2): send: session: closed")
 
 	_, recovered, err := c.recoverDownloadRPC(context.Background(), 4, downloadErr)
 
@@ -444,6 +471,149 @@ func TestRecoverDownloadWorkerRPCUsesSessionDCForSameDC(t *testing.T) {
 	}
 	if got := buf.String(); got != "ok" {
 		t.Fatalf("recovered RPC downloaded %q, want %q", got, "ok")
+	}
+}
+
+func TestDownloadFileEnablesReconnectRetry(t *testing.T) {
+	c, _ := NewClient(1, "h", nil)
+	c.state.setConnected(true)
+	c.testInvoker = &transferRetryDownloadInvoker{client: c}
+
+	got, err := c.DownloadFile(context.Background(), &tg.InputDocumentFileLocation{ID: 1, AccessHash: 2}, 2, nil)
+	if err != nil {
+		t.Fatalf("DownloadFile() error = %v", err)
+	}
+	if string(got) != "ok" {
+		t.Fatalf("DownloadFile() = %q, want %q", got, "ok")
+	}
+}
+
+func TestDownloadToFileEnablesReconnectRetry(t *testing.T) {
+	c, _ := NewClient(1, "h", nil)
+	c.state.setConnected(true)
+	c.testInvoker = &transferRetryDownloadInvoker{client: c}
+
+	err := c.DownloadToFile(
+		context.Background(),
+		&tg.InputDocumentFileLocation{ID: 1, AccessHash: 2},
+		t.TempDir()+"/download",
+		2,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("DownloadToFile() error = %v", err)
+	}
+}
+
+func TestRecoverDownloadWorkerRPCHonorsReconnectCancellation(t *testing.T) {
+	c, _ := NewClient(1, "h", nil)
+	c.cfg.ReconnectEnabled = true
+	c.state.SetDC(1)
+	c.state.SetReconnecting(errors.New("test reconnect"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, recovered, err := c.recoverDownloadWorkerRPC(ctx, 1, 6, 0, ErrNotConnected)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("recoverDownloadWorkerRPC() error = %v, want context.Canceled", err)
+	}
+	if recovered {
+		t.Fatal("recoverDownloadWorkerRPC() recovered = true after cancellation")
+	}
+}
+
+func TestRecoverDownloadRPCHonorsReconnectCancellation(t *testing.T) {
+	c, _ := NewClient(1, "h", nil)
+	c.cfg.ReconnectEnabled = true
+	c.state.SetReconnecting(errors.New("test reconnect"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, recovered, err := c.recoverDownloadRPC(ctx, 0, ErrNotConnected)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("recoverDownloadRPC() error = %v, want context.Canceled", err)
+	}
+	if recovered {
+		t.Fatal("recoverDownloadRPC() recovered = true after cancellation")
+	}
+}
+
+func TestRetryDownloadDCRepairWaitsForMainReconnect(t *testing.T) {
+	c, _ := NewClient(1, "h", nil)
+	c.cfg.ReconnectEnabled = true
+	c.state.SetReconnecting(errors.New("test reconnect"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	replacement := tg.NewRPCClient(newMockDownloadInvoker(nil))
+	firstAttempt := make(chan struct{})
+	var attempts atomic.Int32
+	type result struct {
+		rpc *tg.RPCClient
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		rpc, err := c.retryDownloadDCRepair(ctx, func() (*tg.RPCClient, error) {
+			if attempts.Add(1) == 1 {
+				close(firstAttempt)
+				return nil, ErrNotConnected
+			}
+			return replacement, nil
+		})
+		done <- result{rpc: rpc, err: err}
+	}()
+
+	select {
+	case <-firstAttempt:
+	case <-time.After(time.Second):
+		t.Fatal("repair did not make its first attempt")
+	}
+	select {
+	case got := <-done:
+		t.Fatalf("repair returned before reconnect: %v", got.err)
+	default:
+	}
+
+	c.state.setConnected(true)
+	c.signalReconnect()
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("retryDownloadDCRepair() error = %v", got.err)
+		}
+		if got.rpc != replacement {
+			t.Fatal("retryDownloadDCRepair() returned the wrong RPC client")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("repair did not resume after reconnect")
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("repair attempts = %d, want 2", got)
+	}
+}
+
+func TestRetryDownloadDCRepairHonorsContext(t *testing.T) {
+	c, _ := NewClient(1, "h", nil)
+	c.cfg.ReconnectEnabled = true
+	c.state.SetReconnecting(errors.New("test reconnect"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var attempts atomic.Int32
+	_, err := c.retryDownloadDCRepair(ctx, func() (*tg.RPCClient, error) {
+		attempts.Add(1)
+		return nil, session.ErrNotConnected
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("retryDownloadDCRepair() error = %v, want context.Canceled", err)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("repair attempts = %d, want 1", got)
 	}
 }
 
@@ -526,7 +696,9 @@ func TestStreamFileRetriesFileMigrate(t *testing.T) {
 	c.state.setConnected(true)
 	c.state.SetDC(2)
 	c.testInvoker = &mockDownloadInvoker{err: tgerr.New(303, "FILE_MIGRATE_4")}
-	c.dcSessions.put(4, &dcSessionEntry{rpc: tg.NewRPCClient(newMockDownloadInvoker(data))})
+	if !c.dcSessions.putIfGeneration(4, &dcSessionEntry{rpc: tg.NewRPCClient(newMockDownloadInvoker(data))}, 0) {
+		t.Fatal("failed to seed DC session")
+	}
 
 	ch, err := c.StreamFile(context.Background(), &tg.InputDocumentFileLocation{
 		ID: 100, AccessHash: 200,

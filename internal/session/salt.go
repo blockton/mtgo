@@ -50,7 +50,7 @@ type saltManager struct {
 	refreshRatio float64
 	refreshMin   time.Duration
 
-	notify *sync.Cond
+	notify chan struct{}
 }
 
 func newSaltManager(now nowFunc) *saltManager {
@@ -61,9 +61,25 @@ func newSaltManager(now nowFunc) *saltManager {
 		now:          now,
 		refreshRatio: defaultSaltRefreshRatio,
 		refreshMin:   defaultSaltRefreshMin,
+		notify:       make(chan struct{}),
 	}
-	sm.notify = sync.NewCond(&sm.mu)
 	return sm
+}
+
+// SetNowFunc replaces the time source used for salt validity comparisons.
+// The default is time.Now (wall clock); callers that track a server-time
+// offset should install a function that returns server-adjusted time so
+// salt validity windows (which are server timestamps) are compared against
+// the correct reference.
+func (m *saltManager) SetNowFunc(now nowFunc) {
+	m.mu.Lock()
+	m.now = now
+	m.mu.Unlock()
+}
+
+func (m *saltManager) notifyWaitersLocked() {
+	close(m.notify)
+	m.notify = make(chan struct{})
 }
 
 func (m *saltManager) SetRefreshRatio(r float64) {
@@ -88,7 +104,7 @@ func (m *saltManager) StoreSimple(salt int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.storeSimpleLocked(salt)
-	m.notify.Broadcast()
+	m.notifyWaitersLocked()
 }
 
 func (m *saltManager) storeSimpleLocked(salt int64) {
@@ -136,7 +152,7 @@ func (m *saltManager) StoreFromFutureSalts(salts []saltEntry) {
 		future = future[:8]
 	}
 	m.pending = future
-	m.notify.Broadcast()
+	m.notifyWaitersLocked()
 }
 
 func (m *saltManager) Load() int64 {
@@ -162,33 +178,27 @@ func (m *saltManager) IsExpired() bool {
 	return m.now().Unix() >= m.validUntil
 }
 
-// WaitForValid blocks until the salt manager has a non-expired salt or ctx is
-// done. Returns true if a valid salt is available, false if the context was
-// cancelled.
+// WaitForValid blocks until a valid salt is available or ctx is cancelled.
 func (m *saltManager) WaitForValid(ctx context.Context) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	for {
+		m.mu.Lock()
 		if m.validUntil == 0 || m.now().Unix() < m.validUntil {
+			m.mu.Unlock()
 			return true
 		}
 		m.promoteIfNeededLocked()
 		if m.validUntil == 0 || m.now().Unix() < m.validUntil {
+			m.mu.Unlock()
 			return true
 		}
-		if ctx.Err() != nil {
+		notify := m.notify
+		m.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
 			return false
+		case <-notify:
 		}
-		cancelDone := make(chan struct{})
-		go func() {
-			select {
-			case <-ctx.Done():
-				m.notify.Broadcast()
-			case <-cancelDone:
-			}
-		}()
-		m.notify.Wait()
-		close(cancelDone)
 	}
 }
 
@@ -275,5 +285,5 @@ func (m *saltManager) promoteIfNeededLocked() {
 	}
 	// Wake any goroutine waiting in WaitForValid: a pending salt was just
 	// promoted to current and is now valid.
-	m.notify.Broadcast()
+	m.notifyWaitersLocked()
 }

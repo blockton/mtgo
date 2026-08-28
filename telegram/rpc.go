@@ -2,12 +2,41 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
+	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/mtgo-labs/mtgo/internal/session"
+	"github.com/mtgo-labs/mtgo/telegram/types"
 	"github.com/mtgo-labs/mtgo/tg"
 	"github.com/mtgo-labs/mtgo/tgerr"
 )
+
+type authAttemptContextKey struct{}
+
+// authAttemptGeneration follows transparent RPC retries/migrations and records
+// the permanent-key generation that produced the final successful result.
+type authAttemptGeneration struct {
+	generation atomic.Uint64
+}
+
+func (c *Client) withAuthAttempt(ctx context.Context) (context.Context, *authAttemptGeneration) {
+	attempt := &authAttemptGeneration{}
+	attempt.generation.Store(c.authGeneration.Load())
+	return context.WithValue(ctx, authAttemptContextKey{}, attempt), attempt
+}
+
+func recordAuthAttemptGeneration(ctx context.Context, generation uint64) {
+	if ctx == nil {
+		return
+	}
+	if attempt, ok := ctx.Value(authAttemptContextKey{}).(*authAttemptGeneration); ok && attempt != nil {
+		attempt.generation.Store(generation)
+	}
+}
 
 type clientInvoker struct {
 	client *Client
@@ -15,43 +44,32 @@ type clientInvoker struct {
 
 func (ci *clientInvoker) RPCInvoke(ctx context.Context, input tg.TLObject, decode func(*tg.Reader) (tg.TLObject, error)) (tg.TLObject, error) {
 	cfg := ci.client.config()
-	deadline, ok := ctx.Deadline()
-	timeout := time.Duration(0)
-	if ok {
-		timeout = time.Until(deadline)
-		if timeout < 0 {
-			timeout = 0
+	query, initializesAPI := prepareAPIQuery(cfg, ci.client.apiInit.Load(), input)
+
+	ci.client.Log.Debugf("RPC invoke method=%T", input)
+
+	var result tg.TLObject
+	err := retryTransferFloodWait(ctx, func() error {
+		var invokeErr error
+		result, invokeErr = ci.client.Invoke(ctx, query)
+		if invokeErr != nil {
+			return invokeErr
 		}
-	} else {
-		timeout = cfg.ReqTimeout
-		if timeout <= 0 {
-			timeout = 60 * time.Second
+		if transferFloodRetryEnabled(ctx) {
+			rpcErr, ok := result.(*tg.RPCError)
+			if !ok {
+				return nil
+			}
+			parsed := tgerr.New(int(rpcErr.ErrorCode), rpcErr.ErrorMessage)
+			if _, floodWait := tgerr.AsFloodWait(parsed); floodWait {
+				return parsed
+			}
 		}
-	}
-	if timeout < time.Second {
-		timeout = time.Second
-	}
-
-	retries := cfg.Retries
-	if retries < 1 {
-		retries = 1
-	}
-	ci.client.mu.RLock()
-	apiInit := ci.client.apiInit
-	ci.client.mu.RUnlock()
-
-	query := input
-	if !apiInit && needsInitConnection(input) {
-		query = wrapInitConnection(cfg, input)
-	}
-
-	ci.client.Log.Debugf("RPC invoke method=%T timeout=%s", input, timeout)
-
-	result, err := ci.client.Invoke(ctx, query, retries, timeout)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	ci.client.applyAffected(ctx, input, result)
 	if rpcErr, ok := result.(*tg.RPCError); ok {
 		ci.client.Log.Warnf("RPC error code=%d msg=%s", rpcErr.ErrorCode, rpcErr.ErrorMessage)
 		parsed := tgerr.New(int(rpcErr.ErrorCode), rpcErr.ErrorMessage)
@@ -61,48 +79,94 @@ func (ci *clientInvoker) RPCInvoke(ctx context.Context, input tg.TLObject, decod
 			}
 			return ci.client.handleMigrationError(ctx, parsed, input)
 		}
-		return nil, parsed
+		// Auto-retry FLOOD_WAIT below SleepThreshold.
+		if wait, fwOk := tgerr.AsFloodWait(parsed); fwOk && cfg.SleepThreshold > 0 && wait <= cfg.SleepThreshold {
+			ci.client.Log.Debugf("RPC flood-wait %s: auto-retry within threshold %s", wait, cfg.SleepThreshold)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			result, err = ci.client.Invoke(ctx, query)
+			if err != nil {
+				return nil, err
+			}
+			if rpcErr2, ok := result.(*tg.RPCError); ok {
+				return nil, tgerr.New(int(rpcErr2.ErrorCode), rpcErr2.ErrorMessage)
+			}
+		} else {
+			return nil, parsed
+		}
 	}
 	if result == nil {
 		ci.client.Log.Warnf("RPC nil result method=%T", input)
 		return nil, fmt.Errorf("telegram: nil RPC result for %T", input)
 	}
-	if !apiInit && needsInitConnection(input) {
-		ci.client.mu.Lock()
-		ci.client.apiInit = true
-		ci.client.mu.Unlock()
+	if initializesAPI {
+		ci.client.apiInit.Store(true)
 	}
 	return result, nil
 }
 
 func (ci *clientInvoker) RPCInvokeRaw(ctx context.Context, input tg.TLObject) ([]byte, error) {
-	ci.client.mu.RLock()
-	apiInit := ci.client.apiInit
-	cfg := ci.client.cfg
-	ci.client.mu.RUnlock()
+	cfg := ci.client.config()
+	query, initializesAPI := prepareAPIQuery(cfg, ci.client.apiInit.Load(), input)
 
-	query := input
-	if !apiInit && needsInitConnection(input) {
-		query = wrapInitConnection(cfg, input)
-	}
-
-	data, err := ci.client.InvokeWithRawResult(ctx, query)
+	var data []byte
+	err := retryTransferFloodWait(ctx, func() error {
+		var invokeErr error
+		data, invokeErr = ci.client.InvokeWithRawResult(ctx, query)
+		return invokeErr
+	})
 	if err != nil {
-		if rpcErr, ok := tgerr.As(err); ok && rpcErr.Code == 303 {
-			if shouldReturnMigrationToCaller(input, rpcErr) {
-				return nil, rpcErr
+		// Auto-retry FLOOD_WAIT below SleepThreshold.
+		if wait, fwOk := tgerr.AsFloodWait(err); fwOk && cfg.SleepThreshold > 0 && wait <= cfg.SleepThreshold {
+			ci.client.Log.Debugf("RPC flood-wait %s: auto-retry within threshold %s", wait, cfg.SleepThreshold)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			}
-			_, migErr := ci.client.handleMigrationError(ctx, rpcErr, input)
-			return nil, migErr
+			data, err = ci.client.InvokeWithRawResult(ctx, query)
 		}
-		return nil, err
+		if err != nil {
+			if rpcErr, ok := tgerr.As(err); ok && rpcErr.Code == 303 {
+				if shouldReturnMigrationToCaller(input, rpcErr) {
+					return nil, rpcErr
+				}
+				return ci.client.handleRawMigrationError(ctx, rpcErr, input)
+			}
+			return nil, err
+		}
 	}
-	if !apiInit && needsInitConnection(input) {
-		ci.client.mu.Lock()
-		ci.client.apiInit = true
-		ci.client.mu.Unlock()
+	if initializesAPI {
+		ci.client.apiInit.Store(true)
 	}
 	return data, nil
+}
+
+func retryFloodWait(ctx context.Context, call func() error) error {
+	for {
+		err := call()
+		if err == nil {
+			return nil
+		}
+		waited, waitErr := tgerr.FloodWait(ctx, err)
+		if !waited {
+			return waitErr
+		}
+	}
+}
+
+func retryTransferFloodWait(ctx context.Context, call func() error) error {
+	if !transferFloodRetryEnabled(ctx) {
+		return call()
+	}
+	return retryFloodWait(ctx, call)
+}
+
+func transferFloodRetryEnabled(ctx context.Context) bool {
+	return ctx != nil && ctx.Value(transferRetryContextKey{}) != nil
 }
 
 func shouldReturnMigrationToCaller(input tg.TLObject, err *tgerr.Error) bool {
@@ -126,7 +190,26 @@ func needsInitConnection(input tg.TLObject) bool {
 	}
 }
 
+func prepareAPIQuery(cfg Config, initialized bool, input tg.TLObject) (tg.TLObject, bool) {
+	if initialized || !needsInitConnection(input) {
+		return input, false
+	}
+	return wrapInitConnection(cfg, input), true
+}
+
 func wrapInitConnection(cfg Config, input tg.TLObject) tg.TLObject {
+	var params tg.JSONValueClass
+	if cfg.Device.PackageID != "" {
+		key := "package_id"
+		if cfg.Device.ClientPlatform == types.ClientPlatformIOS {
+			key = "bundle_id"
+		}
+		params = &tg.JSONObject{Value: []*tg.JSONObjectValue{{
+			Key:   key,
+			Value: &tg.JSONString{Value: cfg.Device.PackageID},
+		}}}
+	}
+
 	return &tg.InvokeWithLayerRequest{
 		Layer: tg.Layer,
 		Query: &tg.InitConnectionRequest{
@@ -137,6 +220,7 @@ func wrapInitConnection(cfg Config, input tg.TLObject) tg.TLObject {
 			SystemLangCode: cfg.Device.SystemLangCode,
 			LangPack:       cfg.Device.LangPack,
 			LangCode:       cfg.Device.LangCode,
+			Params:         params,
 			Query:          input,
 		},
 	}
@@ -217,62 +301,232 @@ func (c *Client) InvokeJSON(ctx context.Context, functionName string, payload []
 	return jc.InvokeJSON(ctx, functionName, payload, useSnakeCase)
 }
 
-// inputChannelID returns the raw channel ID of an InputChannel, else 0.
-func inputChannelID(c tg.InputChannelClass) int64 {
-	if ch, ok := c.(*tg.InputChannel); ok {
-		return ch.ChannelID
+// isSessionDeadErr reports whether err indicates the underlying session is no
+// longer usable (closed, draining, or disconnected). These are the errors that
+// trigger reconnect-retry when RetryRPCOnReconnect is enabled.
+func isSessionDeadErr(err error) bool {
+	if _, ok := errors.AsType[*session.DeliveryError](err); ok {
+		return true
 	}
-	return 0
+	return errors.Is(err, session.ErrSessionClosed) ||
+		errors.Is(err, session.ErrDraining) ||
+		errors.Is(err, session.ErrNotConnected) ||
+		errors.Is(err, ErrNotConnected)
 }
 
-// inputPeerChannelID returns the channel ID when the peer is a channel, else 0.
-func inputPeerChannelID(p tg.InputPeerClass) int64 {
-	if ch, ok := p.(*tg.InputPeerChannel); ok {
-		return ch.ChannelID
+// waitForConnect blocks until the client reports a connected state, the context
+// is cancelled, or the client is closed. Returns nil when connected.
+// Uses a channel-based signal (connChanged) to wake immediately on reconnect
+// instead of polling, matching gotd/td's pattern.
+func (c *Client) waitForConnect(ctx context.Context) error {
+	for {
+		if err := c.authLossError(); err != nil {
+			return err
+		}
+		if c.explicitLogout.Load() {
+			return ErrNotConnected
+		}
+		if c.state.IsConnected() {
+			return c.waitMainReadiness(ctx)
+		}
+		if c.state.IsClosed() {
+			return ErrClientClosed
+		}
+
+		c.mu.RLock()
+		ch := c.connChanged
+		c.mu.RUnlock()
+
+		// A transition can close and replace connChanged between the first
+		// state check and this snapshot. Recheck before blocking so that a
+		// connected or terminal client never waits on the replacement channel.
+		if err := c.authLossError(); err != nil {
+			return err
+		}
+		if c.explicitLogout.Load() {
+			return ErrNotConnected
+		}
+		if c.state.IsConnected() {
+			return c.waitMainReadiness(ctx)
+		}
+		if c.state.IsClosed() {
+			return ErrClientClosed
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ch:
+			// Re-evaluate the terminal/connected state and subscribe to the
+			// current generation if the signal represented another transition.
+		}
 	}
-	return 0
 }
 
-// channelIDFromRequest returns the channel a pts-affecting request targets, or
-// 0 for the common sequence. Enumerates request types whose result carries an
-// affected pts increment.
-func channelIDFromRequest(input tg.TLObject) int64 {
-	switch r := input.(type) {
-	case *tg.ChannelsReadHistoryRequest:
-		return inputChannelID(r.Channel)
-	case *tg.ChannelsDeleteMessagesRequest:
-		return inputChannelID(r.Channel)
-	case *tg.ChannelsReadMessageContentsRequest:
-		return inputChannelID(r.Channel)
-	case *tg.ChannelsDeleteParticipantHistoryRequest:
-		return inputChannelID(r.Channel)
-	case *tg.MessagesReadHistoryRequest:
-		return inputPeerChannelID(r.Peer)
-	case *tg.MessagesReadMentionsRequest:
-		return inputPeerChannelID(r.Peer)
-	case *tg.MessagesReadReactionsRequest:
-		return inputPeerChannelID(r.Peer)
+// retrySessionErr retries fn when it returns a session-death error, waiting for
+// reconnection between attempts. When RetryRPCOnReconnect is disabled, fn is
+// called exactly once.
+func (c *Client) retrySessionErr(ctx context.Context, fn func(*session.Session) error, query ...tg.TLObject) error {
+	runAttempt := func(attempt int) (authLoss *authLossState, firstLoss bool, err error) {
+		started := time.Now()
+		var observedErr error
+		var sourceSession *session.Session
+		var sourceAuthGeneration uint64
+		var pfsRejected bool
+		func() {
+			c.authDecisionMu.RLock()
+			defer c.authDecisionMu.RUnlock()
+
+			c.mu.RLock()
+			sess := c.session
+			c.mu.RUnlock()
+			sourceSession = sess
+			sourceAuthGeneration = c.authGeneration.Load()
+			observedErr = fn(sess)
+			err = observedErr
+			if err == nil {
+				recordAuthAttemptGeneration(ctx, sourceAuthGeneration)
+			}
+			if c.activePFSAuthRejection(sess, err) {
+				pfsRejected = true
+				return
+			}
+			if err != nil && c.shouldInvalidateMainAuthFrom(sess, err) {
+				var accepted bool
+				authLoss, firstLoss, accepted = c.latchMainAuthLossFrom(sess, sourceAuthGeneration, err)
+				if accepted {
+					err = c.authLossResult(authLoss)
+				}
+			}
+		}()
+
+		if pfsRejected {
+			err = c.rejectActivePFSKey(sourceSession, err)
+		}
+		// Give terminal cleanup an independent completion path before invoking
+		// application telemetry. A callback may itself call Connect or Start and
+		// wait for this loss to finish.
+		if authLoss != nil {
+			err = c.completeMainAuthInvalidation(authLoss, firstLoss)
+		}
+		// Telemetry is application code and may call Close or Disconnect. It must
+		// run after authDecisionMu is released.
+		c.observeRPC(ctx, firstQuery(query), attempt, started, observedErr)
+		return authLoss, firstLoss, err
 	}
-	return 0
+
+	retryOnReconnect := c.retryRPCOnReconnect(ctx)
+	if !retryOnReconnect {
+		_, _, err := runAttempt(1)
+		return publicDeliveryError(err, firstQuery(query))
+	}
+
+	maxRetries := c.config().MaxRPCReconnectRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
+
+	var lastErr error
+	for attempt := 0; maxRetries < 0 || attempt <= maxRetries; attempt++ {
+		authLoss, _, err := runAttempt(attempt + 1)
+		if err == nil {
+			return nil
+		}
+		if authLoss != nil {
+			return err
+		}
+		if errors.Is(err, errTemporaryAuthKeyRejected) {
+			if !c.config().ReconnectEnabled {
+				return err
+			}
+			lastErr = err
+			if waitErr := c.waitForConnect(ctx); waitErr != nil {
+				return fmt.Errorf("%w (last session error: %v)", waitErr, lastErr)
+			}
+			continue
+		}
+		if !isSessionDeadErr(err) {
+			return err
+		}
+		// RPCReplaySafe is application code and may call Close or Disconnect.
+		// Evaluate it only after authDecisionMu is released.
+		if _, ok := errors.AsType[*session.DeliveryError](err); ok && !c.replaySafe(firstQuery(query)) {
+			return publicDeliveryError(err, firstQuery(query))
+		}
+		lastErr = err
+		if c.Log != nil {
+			c.Log.Debugf("RPC reconnect retry attempt=%d err=%v", attempt+1, err)
+		}
+		if waitErr := c.waitForConnect(ctx); waitErr != nil {
+			return fmt.Errorf("%w (last session error: %v)", waitErr, lastErr)
+		}
+	}
+	return fmt.Errorf("session closed after %d reconnect retries: %w", maxRetries, lastErr)
 }
 
-// applyAffected feeds the pts increment from affectedMessages/affectedHistory
-// RPC results into the update manager, keeping local pts in sync.
-func (c *Client) applyAffected(ctx context.Context, input, result tg.TLObject) {
-	var pts, ptsCount int32
-	switch r := result.(type) {
-	case *tg.MessagesAffectedMessages:
-		pts, ptsCount = r.PTS, r.PTSCount
-	case *tg.MessagesAffectedHistory:
-		pts, ptsCount = r.PTS, r.PTSCount
-	default:
-		return
+func publicDeliveryError(err error, query tg.TLObject) error {
+	deliveryErr, ok := errors.AsType[*session.DeliveryError](err)
+	if !ok {
+		return err
 	}
-	c.mu.RLock()
-	um := c.updateManager
-	c.mu.RUnlock()
-	if um == nil {
-		return
+	state := RPCDeliveryUnknown
+	if deliveryErr.State == session.DeliveryReceived {
+		state = RPCDeliveryReceived
 	}
-	um.ApplyAffected(ctx, channelIDFromRequest(input), int(pts), int(ptsCount))
+	return &RPCDeliveryError{
+		Method: rpcQueryName(query),
+		State:  state,
+		Err:    err,
+	}
+}
+
+func firstQuery(queries []tg.TLObject) tg.TLObject {
+	if len(queries) == 0 {
+		return nil
+	}
+	return queries[0]
+}
+
+func (c *Client) replaySafe(query tg.TLObject) bool {
+	query = session.UnwrapRPCQuery(query)
+	if query == nil {
+		return false
+	}
+	switch query.(type) {
+	case *tg.UploadSaveFilePartRequest, *tg.UploadSaveBigFilePartRequest:
+		// A file part is identified by file_id and part index. Replaying the
+		// exact request replaces the same part instead of duplicating an
+		// application-level mutation.
+		return true
+	}
+	if callback := c.config().RPCReplaySafe; callback != nil && callback(query) {
+		return true
+	}
+	name := rpcQueryName(query)
+	for _, marker := range []string{
+		"AccountGet", "AuthExportAuthorization", "BotsGet", "ChannelsGet",
+		"ChatlistsGet", "ContactsGet", "ContactsResolve", "ContactsSearch",
+		"HelpGet", "LangpackGet", "MessagesCheck", "MessagesGet", "MessagesSearch",
+		"PaymentsGet", "PhoneGet", "PhotosGet", "PremiumGet", "StatsGet",
+		"StatsLoad", "StickersGet", "StoriesGet", "StoriesSearch", "UpdatesGet",
+		"UploadGet", "UsersGet",
+	} {
+		if strings.HasPrefix(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+
+func rpcQueryName(query tg.TLObject) string {
+	query = session.UnwrapRPCQuery(query)
+	if query == nil {
+		return "unknown"
+	}
+	t := reflect.TypeOf(query)
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return strings.TrimSuffix(t.Name(), "Request")
 }

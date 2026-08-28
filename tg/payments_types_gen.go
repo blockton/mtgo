@@ -4,6 +4,7 @@ package tg
 
 import (
 	"bytes"
+	"fmt"
 )
 
 // InvoiceTypeID is the constructor ID for TL type invoice.
@@ -108,11 +109,11 @@ func (v *Invoice) Encode(b *bytes.Buffer) error {
 // DecodeInvoice deserializes a Invoice from a reader using the TL binary protocol.
 func DecodeInvoice(r *Reader) (*Invoice, error) {
 	v := &Invoice{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Test = v.Flags.Has(0)
 	v.NameRequested = v.Flags.Has(1)
 	v.PhoneRequested = v.Flags.Has(2)
@@ -131,6 +132,9 @@ func DecodeInvoice(r *Reader) (*Invoice, error) {
 	if _ehdrPrices != nil {
 		return nil, _ehdrPrices
 	}
+	if _errPrices := checkVectorConstructor(_vhdrPrices); _errPrices != nil {
+		return nil, _errPrices
+	}
 	_cntPrices, _ecntPrices := r.ReadUint32()
 	if _ecntPrices != nil {
 		return nil, _ecntPrices
@@ -144,9 +148,12 @@ func DecodeInvoice(r *Reader) (*Invoice, error) {
 		if _errPrices != nil {
 			return nil, _errPrices
 		}
-		v.Prices[_iPrices] = _objPrices.(*LabeledPrice)
+		_cPrices, _okPrices := _objPrices.(*LabeledPrice)
+		if !_okPrices {
+			return nil, fmt.Errorf("decode: field prices: unexpected type %T", _objPrices)
+		}
+		v.Prices[_iPrices] = _cPrices
 	}
-	_ = _vhdrPrices
 	if v.Flags.Has(8) {
 		_rMaxTipAmount, _eMaxTipAmount := r.ReadInt64()
 		if _eMaxTipAmount != nil {
@@ -288,11 +295,11 @@ func (v *PaymentRequestedInfo) Encode(b *bytes.Buffer) error {
 // DecodePaymentRequestedInfo deserializes a PaymentRequestedInfo from a reader using the TL binary protocol.
 func DecodePaymentRequestedInfo(r *Reader) (*PaymentRequestedInfo, error) {
 	v := &PaymentRequestedInfo{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rName, _eName := r.ReadString()
 		if _eName != nil {
@@ -319,7 +326,11 @@ func DecodePaymentRequestedInfo(r *Reader) (*PaymentRequestedInfo, error) {
 		if _errShippingAddress != nil {
 			return nil, _errShippingAddress
 		}
-		v.ShippingAddress = _objShippingAddress.(*PostAddress)
+		_cShippingAddress, _okShippingAddress := _objShippingAddress.(*PostAddress)
+		if !_okShippingAddress {
+			return nil, fmt.Errorf("decode: field shipping_address: unexpected type %T", _objShippingAddress)
+		}
+		v.ShippingAddress = _cShippingAddress
 	}
 	return v, nil
 }
@@ -507,11 +518,11 @@ func (v *PaymentsPaymentForm) Encode(b *bytes.Buffer) error {
 // DecodePaymentsPaymentForm deserializes a PaymentsPaymentForm from a reader using the TL binary protocol.
 func DecodePaymentsPaymentForm(r *Reader) (*PaymentsPaymentForm, error) {
 	v := &PaymentsPaymentForm{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.CanSaveCredentials = v.Flags.Has(2)
 	v.PasswordMissing = v.Flags.Has(3)
 	_rFormID, _eFormID := r.ReadInt64()
@@ -539,13 +550,21 @@ func DecodePaymentsPaymentForm(r *Reader) (*PaymentsPaymentForm, error) {
 		if _errPhoto != nil {
 			return nil, _errPhoto
 		}
-		v.Photo = _objPhoto.(WebDocumentClass)
+		_cPhoto, _okPhoto := _objPhoto.(WebDocumentClass)
+		if !_okPhoto {
+			return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+		}
+		v.Photo = _cPhoto
 	}
 	_objInvoice, _errInvoice := ReadTLObject(r)
 	if _errInvoice != nil {
 		return nil, _errInvoice
 	}
-	v.Invoice = _objInvoice.(*Invoice)
+	_cInvoice, _okInvoice := _objInvoice.(*Invoice)
+	if !_okInvoice {
+		return nil, fmt.Errorf("decode: field invoice: unexpected type %T", _objInvoice)
+	}
+	v.Invoice = _cInvoice
 	_rProviderID, _eProviderID := r.ReadInt64()
 	if _eProviderID != nil {
 		return nil, _eProviderID
@@ -568,12 +587,19 @@ func DecodePaymentsPaymentForm(r *Reader) (*PaymentsPaymentForm, error) {
 		if _errNativeParams != nil {
 			return nil, _errNativeParams
 		}
-		v.NativeParams = _objNativeParams.(*DataJSON)
+		_cNativeParams, _okNativeParams := _objNativeParams.(*DataJSON)
+		if !_okNativeParams {
+			return nil, fmt.Errorf("decode: field native_params: unexpected type %T", _objNativeParams)
+		}
+		v.NativeParams = _cNativeParams
 	}
 	if v.Flags.Has(6) {
 		_vhdrAdditionalMethods, _ehdrAdditionalMethods := r.ReadUint32()
 		if _ehdrAdditionalMethods != nil {
 			return nil, _ehdrAdditionalMethods
+		}
+		if _errAdditionalMethods := checkVectorConstructor(_vhdrAdditionalMethods); _errAdditionalMethods != nil {
+			return nil, _errAdditionalMethods
 		}
 		_cntAdditionalMethods, _ecntAdditionalMethods := r.ReadUint32()
 		if _ecntAdditionalMethods != nil {
@@ -588,21 +614,31 @@ func DecodePaymentsPaymentForm(r *Reader) (*PaymentsPaymentForm, error) {
 			if _errAdditionalMethods != nil {
 				return nil, _errAdditionalMethods
 			}
-			v.AdditionalMethods[_iAdditionalMethods] = _objAdditionalMethods.(*PaymentFormMethod)
+			_cAdditionalMethods, _okAdditionalMethods := _objAdditionalMethods.(*PaymentFormMethod)
+			if !_okAdditionalMethods {
+				return nil, fmt.Errorf("decode: field additional_methods: unexpected type %T", _objAdditionalMethods)
+			}
+			v.AdditionalMethods[_iAdditionalMethods] = _cAdditionalMethods
 		}
-		_ = _vhdrAdditionalMethods
 	}
 	if v.Flags.Has(0) {
 		_objSavedInfo, _errSavedInfo := ReadTLObject(r)
 		if _errSavedInfo != nil {
 			return nil, _errSavedInfo
 		}
-		v.SavedInfo = _objSavedInfo.(*PaymentRequestedInfo)
+		_cSavedInfo, _okSavedInfo := _objSavedInfo.(*PaymentRequestedInfo)
+		if !_okSavedInfo {
+			return nil, fmt.Errorf("decode: field saved_info: unexpected type %T", _objSavedInfo)
+		}
+		v.SavedInfo = _cSavedInfo
 	}
 	if v.Flags.Has(1) {
 		_vhdrSavedCredentials, _ehdrSavedCredentials := r.ReadUint32()
 		if _ehdrSavedCredentials != nil {
 			return nil, _ehdrSavedCredentials
+		}
+		if _errSavedCredentials := checkVectorConstructor(_vhdrSavedCredentials); _errSavedCredentials != nil {
+			return nil, _errSavedCredentials
 		}
 		_cntSavedCredentials, _ecntSavedCredentials := r.ReadUint32()
 		if _ecntSavedCredentials != nil {
@@ -617,13 +653,19 @@ func DecodePaymentsPaymentForm(r *Reader) (*PaymentsPaymentForm, error) {
 			if _errSavedCredentials != nil {
 				return nil, _errSavedCredentials
 			}
-			v.SavedCredentials[_iSavedCredentials] = _objSavedCredentials.(*PaymentSavedCredentialsCard)
+			_cSavedCredentials, _okSavedCredentials := _objSavedCredentials.(*PaymentSavedCredentialsCard)
+			if !_okSavedCredentials {
+				return nil, fmt.Errorf("decode: field saved_credentials: unexpected type %T", _objSavedCredentials)
+			}
+			v.SavedCredentials[_iSavedCredentials] = _cSavedCredentials
 		}
-		_ = _vhdrSavedCredentials
 	}
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -638,9 +680,12 @@ func DecodePaymentsPaymentForm(r *Reader) (*PaymentsPaymentForm, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -700,11 +745,11 @@ func (v *PaymentsPaymentFormStars) Encode(b *bytes.Buffer) error {
 // DecodePaymentsPaymentFormStars deserializes a PaymentsPaymentFormStars from a reader using the TL binary protocol.
 func DecodePaymentsPaymentFormStars(r *Reader) (*PaymentsPaymentFormStars, error) {
 	v := &PaymentsPaymentFormStars{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rFormID, _eFormID := r.ReadInt64()
 	if _eFormID != nil {
 		return nil, _eFormID
@@ -730,16 +775,27 @@ func DecodePaymentsPaymentFormStars(r *Reader) (*PaymentsPaymentFormStars, error
 		if _errPhoto != nil {
 			return nil, _errPhoto
 		}
-		v.Photo = _objPhoto.(WebDocumentClass)
+		_cPhoto, _okPhoto := _objPhoto.(WebDocumentClass)
+		if !_okPhoto {
+			return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+		}
+		v.Photo = _cPhoto
 	}
 	_objInvoice, _errInvoice := ReadTLObject(r)
 	if _errInvoice != nil {
 		return nil, _errInvoice
 	}
-	v.Invoice = _objInvoice.(*Invoice)
+	_cInvoice, _okInvoice := _objInvoice.(*Invoice)
+	if !_okInvoice {
+		return nil, fmt.Errorf("decode: field invoice: unexpected type %T", _objInvoice)
+	}
+	v.Invoice = _cInvoice
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -754,9 +810,12 @@ func DecodePaymentsPaymentFormStars(r *Reader) (*PaymentsPaymentFormStars, error
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -799,7 +858,11 @@ func DecodePaymentsPaymentFormStarGift(r *Reader) (*PaymentsPaymentFormStarGift,
 	if _errInvoice != nil {
 		return nil, _errInvoice
 	}
-	v.Invoice = _objInvoice.(*Invoice)
+	_cInvoice, _okInvoice := _objInvoice.(*Invoice)
+	if !_okInvoice {
+		return nil, fmt.Errorf("decode: field invoice: unexpected type %T", _objInvoice)
+	}
+	v.Invoice = _cInvoice
 	return v, nil
 }
 
@@ -857,11 +920,11 @@ func (v *PaymentsValidatedRequestedInfo) Encode(b *bytes.Buffer) error {
 // DecodePaymentsValidatedRequestedInfo deserializes a PaymentsValidatedRequestedInfo from a reader using the TL binary protocol.
 func DecodePaymentsValidatedRequestedInfo(r *Reader) (*PaymentsValidatedRequestedInfo, error) {
 	v := &PaymentsValidatedRequestedInfo{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rID, _eID := r.ReadString()
 		if _eID != nil {
@@ -873,6 +936,9 @@ func DecodePaymentsValidatedRequestedInfo(r *Reader) (*PaymentsValidatedRequeste
 		_vhdrShippingOptions, _ehdrShippingOptions := r.ReadUint32()
 		if _ehdrShippingOptions != nil {
 			return nil, _ehdrShippingOptions
+		}
+		if _errShippingOptions := checkVectorConstructor(_vhdrShippingOptions); _errShippingOptions != nil {
+			return nil, _errShippingOptions
 		}
 		_cntShippingOptions, _ecntShippingOptions := r.ReadUint32()
 		if _ecntShippingOptions != nil {
@@ -887,9 +953,12 @@ func DecodePaymentsValidatedRequestedInfo(r *Reader) (*PaymentsValidatedRequeste
 			if _errShippingOptions != nil {
 				return nil, _errShippingOptions
 			}
-			v.ShippingOptions[_iShippingOptions] = _objShippingOptions.(*ShippingOption)
+			_cShippingOptions, _okShippingOptions := _objShippingOptions.(*ShippingOption)
+			if !_okShippingOptions {
+				return nil, fmt.Errorf("decode: field shipping_options: unexpected type %T", _objShippingOptions)
+			}
+			v.ShippingOptions[_iShippingOptions] = _cShippingOptions
 		}
-		_ = _vhdrShippingOptions
 	}
 	return v, nil
 }
@@ -946,7 +1015,11 @@ func DecodePaymentsPaymentResult(r *Reader) (*PaymentsPaymentResult, error) {
 	if _errUpdates != nil {
 		return nil, _errUpdates
 	}
-	v.Updates = _objUpdates.(UpdatesClass)
+	_cUpdates, _okUpdates := _objUpdates.(UpdatesClass)
+	if !_okUpdates {
+		return nil, fmt.Errorf("decode: field updates: unexpected type %T", _objUpdates)
+	}
+	v.Updates = _cUpdates
 	return v, nil
 }
 
@@ -1091,11 +1164,11 @@ func (v *PaymentsPaymentReceipt) Encode(b *bytes.Buffer) error {
 // DecodePaymentsPaymentReceipt deserializes a PaymentsPaymentReceipt from a reader using the TL binary protocol.
 func DecodePaymentsPaymentReceipt(r *Reader) (*PaymentsPaymentReceipt, error) {
 	v := &PaymentsPaymentReceipt{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -1126,26 +1199,42 @@ func DecodePaymentsPaymentReceipt(r *Reader) (*PaymentsPaymentReceipt, error) {
 		if _errPhoto != nil {
 			return nil, _errPhoto
 		}
-		v.Photo = _objPhoto.(WebDocumentClass)
+		_cPhoto, _okPhoto := _objPhoto.(WebDocumentClass)
+		if !_okPhoto {
+			return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+		}
+		v.Photo = _cPhoto
 	}
 	_objInvoice, _errInvoice := ReadTLObject(r)
 	if _errInvoice != nil {
 		return nil, _errInvoice
 	}
-	v.Invoice = _objInvoice.(*Invoice)
+	_cInvoice, _okInvoice := _objInvoice.(*Invoice)
+	if !_okInvoice {
+		return nil, fmt.Errorf("decode: field invoice: unexpected type %T", _objInvoice)
+	}
+	v.Invoice = _cInvoice
 	if v.Flags.Has(0) {
 		_objInfo, _errInfo := ReadTLObject(r)
 		if _errInfo != nil {
 			return nil, _errInfo
 		}
-		v.Info = _objInfo.(*PaymentRequestedInfo)
+		_cInfo, _okInfo := _objInfo.(*PaymentRequestedInfo)
+		if !_okInfo {
+			return nil, fmt.Errorf("decode: field info: unexpected type %T", _objInfo)
+		}
+		v.Info = _cInfo
 	}
 	if v.Flags.Has(1) {
 		_objShipping, _errShipping := ReadTLObject(r)
 		if _errShipping != nil {
 			return nil, _errShipping
 		}
-		v.Shipping = _objShipping.(*ShippingOption)
+		_cShipping, _okShipping := _objShipping.(*ShippingOption)
+		if !_okShipping {
+			return nil, fmt.Errorf("decode: field shipping: unexpected type %T", _objShipping)
+		}
+		v.Shipping = _cShipping
 	}
 	if v.Flags.Has(3) {
 		_rTipAmount, _eTipAmount := r.ReadInt64()
@@ -1173,6 +1262,9 @@ func DecodePaymentsPaymentReceipt(r *Reader) (*PaymentsPaymentReceipt, error) {
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
 	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
+	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
 		return nil, _ecntUsers
@@ -1186,9 +1278,12 @@ func DecodePaymentsPaymentReceipt(r *Reader) (*PaymentsPaymentReceipt, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -1254,11 +1349,11 @@ func (v *PaymentsPaymentReceiptStars) Encode(b *bytes.Buffer) error {
 // DecodePaymentsPaymentReceiptStars deserializes a PaymentsPaymentReceiptStars from a reader using the TL binary protocol.
 func DecodePaymentsPaymentReceiptStars(r *Reader) (*PaymentsPaymentReceiptStars, error) {
 	v := &PaymentsPaymentReceiptStars{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -1284,13 +1379,21 @@ func DecodePaymentsPaymentReceiptStars(r *Reader) (*PaymentsPaymentReceiptStars,
 		if _errPhoto != nil {
 			return nil, _errPhoto
 		}
-		v.Photo = _objPhoto.(WebDocumentClass)
+		_cPhoto, _okPhoto := _objPhoto.(WebDocumentClass)
+		if !_okPhoto {
+			return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+		}
+		v.Photo = _cPhoto
 	}
 	_objInvoice, _errInvoice := ReadTLObject(r)
 	if _errInvoice != nil {
 		return nil, _errInvoice
 	}
-	v.Invoice = _objInvoice.(*Invoice)
+	_cInvoice, _okInvoice := _objInvoice.(*Invoice)
+	if !_okInvoice {
+		return nil, fmt.Errorf("decode: field invoice: unexpected type %T", _objInvoice)
+	}
+	v.Invoice = _cInvoice
 	_rCurrency, _eCurrency := r.ReadString()
 	if _eCurrency != nil {
 		return nil, _eCurrency
@@ -1310,6 +1413,9 @@ func DecodePaymentsPaymentReceiptStars(r *Reader) (*PaymentsPaymentReceiptStars,
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
 	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
+	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
 		return nil, _ecntUsers
@@ -1323,9 +1429,12 @@ func DecodePaymentsPaymentReceiptStars(r *Reader) (*PaymentsPaymentReceiptStars,
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -1376,18 +1485,22 @@ func (v *PaymentsSavedInfo) Encode(b *bytes.Buffer) error {
 // DecodePaymentsSavedInfo deserializes a PaymentsSavedInfo from a reader using the TL binary protocol.
 func DecodePaymentsSavedInfo(r *Reader) (*PaymentsSavedInfo, error) {
 	v := &PaymentsSavedInfo{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.HasSavedCredentials = v.Flags.Has(1)
 	if v.Flags.Has(0) {
 		_objSavedInfo, _errSavedInfo := ReadTLObject(r)
 		if _errSavedInfo != nil {
 			return nil, _errSavedInfo
 		}
-		v.SavedInfo = _objSavedInfo.(*PaymentRequestedInfo)
+		_cSavedInfo, _okSavedInfo := _objSavedInfo.(*PaymentRequestedInfo)
+		if !_okSavedInfo {
+			return nil, fmt.Errorf("decode: field saved_info: unexpected type %T", _objSavedInfo)
+		}
+		v.SavedInfo = _cSavedInfo
 	}
 	return v, nil
 }
@@ -1506,17 +1619,21 @@ func (v *InputPaymentCredentials) Encode(b *bytes.Buffer) error {
 // DecodeInputPaymentCredentials deserializes a InputPaymentCredentials from a reader using the TL binary protocol.
 func DecodeInputPaymentCredentials(r *Reader) (*InputPaymentCredentials, error) {
 	v := &InputPaymentCredentials{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Save = v.Flags.Has(0)
 	_objData, _errData := ReadTLObject(r)
 	if _errData != nil {
 		return nil, _errData
 	}
-	v.Data = _objData.(*DataJSON)
+	_cData, _okData := _objData.(*DataJSON)
+	if !_okData {
+		return nil, fmt.Errorf("decode: field data: unexpected type %T", _objData)
+	}
+	v.Data = _cData
 	return v, nil
 }
 
@@ -1552,7 +1669,11 @@ func DecodeInputPaymentCredentialsApplePay(r *Reader) (*InputPaymentCredentialsA
 	if _errPaymentData != nil {
 		return nil, _errPaymentData
 	}
-	v.PaymentData = _objPaymentData.(*DataJSON)
+	_cPaymentData, _okPaymentData := _objPaymentData.(*DataJSON)
+	if !_okPaymentData {
+		return nil, fmt.Errorf("decode: field payment_data: unexpected type %T", _objPaymentData)
+	}
+	v.PaymentData = _cPaymentData
 	return v, nil
 }
 
@@ -1588,7 +1709,11 @@ func DecodeInputPaymentCredentialsGooglePay(r *Reader) (*InputPaymentCredentials
 	if _errPaymentToken != nil {
 		return nil, _errPaymentToken
 	}
-	v.PaymentToken = _objPaymentToken.(*DataJSON)
+	_cPaymentToken, _okPaymentToken := _objPaymentToken.(*DataJSON)
+	if !_okPaymentToken {
+		return nil, fmt.Errorf("decode: field payment_token: unexpected type %T", _objPaymentToken)
+	}
+	v.PaymentToken = _cPaymentToken
 	return v, nil
 }
 
@@ -1645,6 +1770,9 @@ func DecodeShippingOption(r *Reader) (*ShippingOption, error) {
 	if _ehdrPrices != nil {
 		return nil, _ehdrPrices
 	}
+	if _errPrices := checkVectorConstructor(_vhdrPrices); _errPrices != nil {
+		return nil, _errPrices
+	}
 	_cntPrices, _ecntPrices := r.ReadUint32()
 	if _ecntPrices != nil {
 		return nil, _ecntPrices
@@ -1658,9 +1786,12 @@ func DecodeShippingOption(r *Reader) (*ShippingOption, error) {
 		if _errPrices != nil {
 			return nil, _errPrices
 		}
-		v.Prices[_iPrices] = _objPrices.(*LabeledPrice)
+		_cPrices, _okPrices := _objPrices.(*LabeledPrice)
+		if !_okPrices {
+			return nil, fmt.Errorf("decode: field prices: unexpected type %T", _objPrices)
+		}
+		v.Prices[_iPrices] = _cPrices
 	}
-	_ = _vhdrPrices
 	return v, nil
 }
 
@@ -1756,6 +1887,9 @@ func DecodePaymentsBankCardData(r *Reader) (*PaymentsBankCardData, error) {
 	if _ehdrOpenUrls != nil {
 		return nil, _ehdrOpenUrls
 	}
+	if _errOpenUrls := checkVectorConstructor(_vhdrOpenUrls); _errOpenUrls != nil {
+		return nil, _errOpenUrls
+	}
 	_cntOpenUrls, _ecntOpenUrls := r.ReadUint32()
 	if _ecntOpenUrls != nil {
 		return nil, _ecntOpenUrls
@@ -1769,9 +1903,12 @@ func DecodePaymentsBankCardData(r *Reader) (*PaymentsBankCardData, error) {
 		if _errOpenUrls != nil {
 			return nil, _errOpenUrls
 		}
-		v.OpenUrls[_iOpenUrls] = _objOpenUrls.(*BankCardOpenURL)
+		_cOpenUrls, _okOpenUrls := _objOpenUrls.(*BankCardOpenURL)
+		if !_okOpenUrls {
+			return nil, fmt.Errorf("decode: field open_urls: unexpected type %T", _objOpenUrls)
+		}
+		v.OpenUrls[_iOpenUrls] = _cOpenUrls
 	}
-	_ = _vhdrOpenUrls
 	return v, nil
 }
 
@@ -1820,7 +1957,7 @@ const InputInvoicePremiumGiftStarsTypeID = 0xdabab2ef
 const InputInvoiceBusinessBotTransferStarsTypeID = 0xf4997e42
 
 // InputInvoiceStarGiftResaleTypeID is the constructor ID for TL type inputInvoiceStarGiftResale.
-const InputInvoiceStarGiftResaleTypeID = 0xc39f5324
+const InputInvoiceStarGiftResaleTypeID = 0xe9b0c658
 
 // InputInvoiceStarGiftPrepaidUpgradeTypeID is the constructor ID for TL type inputInvoiceStarGiftPrepaidUpgrade.
 const InputInvoiceStarGiftPrepaidUpgradeTypeID = 0x9a0b48b8
@@ -1907,7 +2044,11 @@ func DecodeInputInvoiceMessage(r *Reader) (*InputInvoiceMessage, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(InputPeerClass)
+	_cPeer, _okPeer := _objPeer.(InputPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rMsgID, _eMsgID := r.ReadInt32()
 	if _eMsgID != nil {
 		return nil, _eMsgID
@@ -1986,12 +2127,20 @@ func DecodeInputInvoicePremiumGiftCode(r *Reader) (*InputInvoicePremiumGiftCode,
 	if _errPurpose != nil {
 		return nil, _errPurpose
 	}
-	v.Purpose = _objPurpose.(InputStorePaymentPurposeClass)
+	_cPurpose, _okPurpose := _objPurpose.(InputStorePaymentPurposeClass)
+	if !_okPurpose {
+		return nil, fmt.Errorf("decode: field purpose: unexpected type %T", _objPurpose)
+	}
+	v.Purpose = _cPurpose
 	_objOption, _errOption := ReadTLObject(r)
 	if _errOption != nil {
 		return nil, _errOption
 	}
-	v.Option = _objOption.(*PremiumGiftCodeOption)
+	_cOption, _okOption := _objOption.(*PremiumGiftCodeOption)
+	if !_okOption {
+		return nil, fmt.Errorf("decode: field option: unexpected type %T", _objOption)
+	}
+	v.Option = _cOption
 	return v, nil
 }
 
@@ -2027,7 +2176,11 @@ func DecodeInputInvoiceStars(r *Reader) (*InputInvoiceStars, error) {
 	if _errPurpose != nil {
 		return nil, _errPurpose
 	}
-	v.Purpose = _objPurpose.(InputStorePaymentPurposeClass)
+	_cPurpose, _okPurpose := _objPurpose.(InputStorePaymentPurposeClass)
+	if !_okPurpose {
+		return nil, fmt.Errorf("decode: field purpose: unexpected type %T", _objPurpose)
+	}
+	v.Purpose = _cPurpose
 	return v, nil
 }
 
@@ -2119,18 +2272,22 @@ func (v *InputInvoiceStarGift) Encode(b *bytes.Buffer) error {
 // DecodeInputInvoiceStarGift deserializes a InputInvoiceStarGift from a reader using the TL binary protocol.
 func DecodeInputInvoiceStarGift(r *Reader) (*InputInvoiceStarGift, error) {
 	v := &InputInvoiceStarGift{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.HideName = v.Flags.Has(0)
 	v.IncludeUpgrade = v.Flags.Has(2)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(InputPeerClass)
+	_cPeer, _okPeer := _objPeer.(InputPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rGiftID, _eGiftID := r.ReadInt64()
 	if _eGiftID != nil {
 		return nil, _eGiftID
@@ -2141,7 +2298,11 @@ func DecodeInputInvoiceStarGift(r *Reader) (*InputInvoiceStarGift, error) {
 		if _errMessage != nil {
 			return nil, _errMessage
 		}
-		v.Message = _objMessage.(*TextWithEntities)
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	return v, nil
 }
@@ -2185,17 +2346,21 @@ func (v *InputInvoiceStarGiftUpgrade) Encode(b *bytes.Buffer) error {
 // DecodeInputInvoiceStarGiftUpgrade deserializes a InputInvoiceStarGiftUpgrade from a reader using the TL binary protocol.
 func DecodeInputInvoiceStarGiftUpgrade(r *Reader) (*InputInvoiceStarGiftUpgrade, error) {
 	v := &InputInvoiceStarGiftUpgrade{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.KeepOriginalDetails = v.Flags.Has(0)
 	_objStargift, _errStargift := ReadTLObject(r)
 	if _errStargift != nil {
 		return nil, _errStargift
 	}
-	v.Stargift = _objStargift.(InputSavedStarGiftClass)
+	_cStargift, _okStargift := _objStargift.(InputSavedStarGiftClass)
+	if !_okStargift {
+		return nil, fmt.Errorf("decode: field stargift: unexpected type %T", _objStargift)
+	}
+	v.Stargift = _cStargift
 	return v, nil
 }
 
@@ -2233,12 +2398,20 @@ func DecodeInputInvoiceStarGiftTransfer(r *Reader) (*InputInvoiceStarGiftTransfe
 	if _errStargift != nil {
 		return nil, _errStargift
 	}
-	v.Stargift = _objStargift.(InputSavedStarGiftClass)
+	_cStargift, _okStargift := _objStargift.(InputSavedStarGiftClass)
+	if !_okStargift {
+		return nil, fmt.Errorf("decode: field stargift: unexpected type %T", _objStargift)
+	}
+	v.Stargift = _cStargift
 	_objToID, _errToID := ReadTLObject(r)
 	if _errToID != nil {
 		return nil, _errToID
 	}
-	v.ToID = _objToID.(InputPeerClass)
+	_cToID, _okToID := _objToID.(InputPeerClass)
+	if !_okToID {
+		return nil, fmt.Errorf("decode: field to_id: unexpected type %T", _objToID)
+	}
+	v.ToID = _cToID
 	return v, nil
 }
 
@@ -2286,16 +2459,20 @@ func (v *InputInvoicePremiumGiftStars) Encode(b *bytes.Buffer) error {
 // DecodeInputInvoicePremiumGiftStars deserializes a InputInvoicePremiumGiftStars from a reader using the TL binary protocol.
 func DecodeInputInvoicePremiumGiftStars(r *Reader) (*InputInvoicePremiumGiftStars, error) {
 	v := &InputInvoicePremiumGiftStars{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objUserID, _errUserID := ReadTLObject(r)
 	if _errUserID != nil {
 		return nil, _errUserID
 	}
-	v.UserID = _objUserID.(InputUserClass)
+	_cUserID, _okUserID := _objUserID.(InputUserClass)
+	if !_okUserID {
+		return nil, fmt.Errorf("decode: field user_id: unexpected type %T", _objUserID)
+	}
+	v.UserID = _cUserID
 	_rMonths, _eMonths := r.ReadInt32()
 	if _eMonths != nil {
 		return nil, _eMonths
@@ -2306,7 +2483,11 @@ func DecodeInputInvoicePremiumGiftStars(r *Reader) (*InputInvoicePremiumGiftStar
 		if _errMessage != nil {
 			return nil, _errMessage
 		}
-		v.Message = _objMessage.(*TextWithEntities)
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	return v, nil
 }
@@ -2345,7 +2526,11 @@ func DecodeInputInvoiceBusinessBotTransferStars(r *Reader) (*InputInvoiceBusines
 	if _errBot != nil {
 		return nil, _errBot
 	}
-	v.Bot = _objBot.(InputUserClass)
+	_cBot, _okBot := _objBot.(InputUserClass)
+	if !_okBot {
+		return nil, fmt.Errorf("decode: field bot: unexpected type %T", _objBot)
+	}
+	v.Bot = _cBot
 	_rStars, _eStars := r.ReadInt64()
 	if _eStars != nil {
 		return nil, _eStars
@@ -2360,14 +2545,16 @@ func init() {
 	}
 }
 
-// InputInvoiceStarGiftResale represents the TL constructor inputInvoiceStarGiftResale (0xc39f5324).
+// InputInvoiceStarGiftResale represents the TL constructor inputInvoiceStarGiftResale (0xe9b0c658).
 //
 // See https://core.telegram.org/constructor/inputInvoiceStarGiftResale for reference.
 type InputInvoiceStarGiftResale struct {
-	Flags Fields         `json:"-"`
-	Ton   bool           `json:"ton,omitempty"`
-	Slug  string         `json:"slug,omitempty"`
-	ToID  InputPeerClass `json:"to_id,omitempty"`
+	Flags    Fields            `json:"-"`
+	Ton      bool              `json:"ton,omitempty"`
+	ShowName bool              `json:"show_name,omitempty"`
+	Slug     string            `json:"slug,omitempty"`
+	ToID     InputPeerClass    `json:"to_id,omitempty"`
+	Message  *TextWithEntities `json:"message,omitempty"`
 }
 
 // SetFlags computes flags from non-zero optional fields.
@@ -2375,9 +2562,15 @@ func (v *InputInvoiceStarGiftResale) SetFlags() {
 	if v.Ton {
 		v.Flags.Set(0)
 	}
+	if v.ShowName {
+		v.Flags.Set(2)
+	}
+	if v.Message != nil {
+		v.Flags.Set(1)
+	}
 }
 
-// ConstructorID returns the TL constructor identifier 0xc39f5324.
+// ConstructorID returns the TL constructor identifier 0xe9b0c658.
 func (v *InputInvoiceStarGiftResale) ConstructorID() uint32 {
 	return InputInvoiceStarGiftResaleTypeID
 }
@@ -2389,18 +2582,22 @@ func (v *InputInvoiceStarGiftResale) Encode(b *bytes.Buffer) error {
 	WriteInt(b, uint32(v.Flags))
 	WriteString(b, v.Slug)
 	EncodeTLObject(b, v.ToID)
+	if v.Flags.Has(1) {
+		EncodeTLObject(b, v.Message)
+	}
 	return nil
 }
 
 // DecodeInputInvoiceStarGiftResale deserializes a InputInvoiceStarGiftResale from a reader using the TL binary protocol.
 func DecodeInputInvoiceStarGiftResale(r *Reader) (*InputInvoiceStarGiftResale, error) {
 	v := &InputInvoiceStarGiftResale{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Ton = v.Flags.Has(0)
+	v.ShowName = v.Flags.Has(2)
 	_rSlug, _eSlug := r.ReadString()
 	if _eSlug != nil {
 		return nil, _eSlug
@@ -2410,7 +2607,22 @@ func DecodeInputInvoiceStarGiftResale(r *Reader) (*InputInvoiceStarGiftResale, e
 	if _errToID != nil {
 		return nil, _errToID
 	}
-	v.ToID = _objToID.(InputPeerClass)
+	_cToID, _okToID := _objToID.(InputPeerClass)
+	if !_okToID {
+		return nil, fmt.Errorf("decode: field to_id: unexpected type %T", _objToID)
+	}
+	v.ToID = _cToID
+	if v.Flags.Has(1) {
+		_objMessage, _errMessage := ReadTLObject(r)
+		if _errMessage != nil {
+			return nil, _errMessage
+		}
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
+	}
 	return v, nil
 }
 
@@ -2448,7 +2660,11 @@ func DecodeInputInvoiceStarGiftPrepaidUpgrade(r *Reader) (*InputInvoiceStarGiftP
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(InputPeerClass)
+	_cPeer, _okPeer := _objPeer.(InputPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rHash, _eHash := r.ReadString()
 	if _eHash != nil {
 		return nil, _eHash
@@ -2489,7 +2705,11 @@ func DecodeInputInvoicePremiumAuthCode(r *Reader) (*InputInvoicePremiumAuthCode,
 	if _errPurpose != nil {
 		return nil, _errPurpose
 	}
-	v.Purpose = _objPurpose.(InputStorePaymentPurposeClass)
+	_cPurpose, _okPurpose := _objPurpose.(InputStorePaymentPurposeClass)
+	if !_okPurpose {
+		return nil, fmt.Errorf("decode: field purpose: unexpected type %T", _objPurpose)
+	}
+	v.Purpose = _cPurpose
 	return v, nil
 }
 
@@ -2525,7 +2745,11 @@ func DecodeInputInvoiceStarGiftDropOriginalDetails(r *Reader) (*InputInvoiceStar
 	if _errStargift != nil {
 		return nil, _errStargift
 	}
-	v.Stargift = _objStargift.(InputSavedStarGiftClass)
+	_cStargift, _okStargift := _objStargift.(InputSavedStarGiftClass)
+	if !_okStargift {
+		return nil, fmt.Errorf("decode: field stargift: unexpected type %T", _objStargift)
+	}
+	v.Stargift = _cStargift
 	return v, nil
 }
 
@@ -2588,11 +2812,11 @@ func (v *InputInvoiceStarGiftAuctionBid) Encode(b *bytes.Buffer) error {
 // DecodeInputInvoiceStarGiftAuctionBid deserializes a InputInvoiceStarGiftAuctionBid from a reader using the TL binary protocol.
 func DecodeInputInvoiceStarGiftAuctionBid(r *Reader) (*InputInvoiceStarGiftAuctionBid, error) {
 	v := &InputInvoiceStarGiftAuctionBid{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.HideName = v.Flags.Has(0)
 	v.UpdateBid = v.Flags.Has(2)
 	if v.Flags.Has(3) {
@@ -2600,7 +2824,11 @@ func DecodeInputInvoiceStarGiftAuctionBid(r *Reader) (*InputInvoiceStarGiftAucti
 		if _errPeer != nil {
 			return nil, _errPeer
 		}
-		v.Peer = _objPeer.(InputPeerClass)
+		_cPeer, _okPeer := _objPeer.(InputPeerClass)
+		if !_okPeer {
+			return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+		}
+		v.Peer = _cPeer
 	}
 	_rGiftID, _eGiftID := r.ReadInt64()
 	if _eGiftID != nil {
@@ -2617,7 +2845,11 @@ func DecodeInputInvoiceStarGiftAuctionBid(r *Reader) (*InputInvoiceStarGiftAucti
 		if _errMessage != nil {
 			return nil, _errMessage
 		}
-		v.Message = _objMessage.(*TextWithEntities)
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	return v, nil
 }
@@ -2758,11 +2990,11 @@ func (v *InputStorePaymentPremiumSubscription) Encode(b *bytes.Buffer) error {
 // DecodeInputStorePaymentPremiumSubscription deserializes a InputStorePaymentPremiumSubscription from a reader using the TL binary protocol.
 func DecodeInputStorePaymentPremiumSubscription(r *Reader) (*InputStorePaymentPremiumSubscription, error) {
 	v := &InputStorePaymentPremiumSubscription{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Restore = v.Flags.Has(0)
 	v.Upgrade = v.Flags.Has(1)
 	return v, nil
@@ -2804,7 +3036,11 @@ func DecodeInputStorePaymentGiftPremium(r *Reader) (*InputStorePaymentGiftPremiu
 	if _errUserID != nil {
 		return nil, _errUserID
 	}
-	v.UserID = _objUserID.(InputUserClass)
+	_cUserID, _okUserID := _objUserID.(InputUserClass)
+	if !_okUserID {
+		return nil, fmt.Errorf("decode: field user_id: unexpected type %T", _objUserID)
+	}
+	v.UserID = _cUserID
 	_rCurrency, _eCurrency := r.ReadString()
 	if _eCurrency != nil {
 		return nil, _eCurrency
@@ -2875,14 +3111,17 @@ func (v *InputStorePaymentPremiumGiftCode) Encode(b *bytes.Buffer) error {
 // DecodeInputStorePaymentPremiumGiftCode deserializes a InputStorePaymentPremiumGiftCode from a reader using the TL binary protocol.
 func DecodeInputStorePaymentPremiumGiftCode(r *Reader) (*InputStorePaymentPremiumGiftCode, error) {
 	v := &InputStorePaymentPremiumGiftCode{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -2897,15 +3136,22 @@ func DecodeInputStorePaymentPremiumGiftCode(r *Reader) (*InputStorePaymentPremiu
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(InputUserClass)
+		_cUsers, _okUsers := _objUsers.(InputUserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	if v.Flags.Has(0) {
 		_objBoostPeer, _errBoostPeer := ReadTLObject(r)
 		if _errBoostPeer != nil {
 			return nil, _errBoostPeer
 		}
-		v.BoostPeer = _objBoostPeer.(InputPeerClass)
+		_cBoostPeer, _okBoostPeer := _objBoostPeer.(InputPeerClass)
+		if !_okBoostPeer {
+			return nil, fmt.Errorf("decode: field boost_peer: unexpected type %T", _objBoostPeer)
+		}
+		v.BoostPeer = _cBoostPeer
 	}
 	_rCurrency, _eCurrency := r.ReadString()
 	if _eCurrency != nil {
@@ -2922,7 +3168,11 @@ func DecodeInputStorePaymentPremiumGiftCode(r *Reader) (*InputStorePaymentPremiu
 		if _errMessage != nil {
 			return nil, _errMessage
 		}
-		v.Message = _objMessage.(*TextWithEntities)
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	return v, nil
 }
@@ -3003,22 +3253,29 @@ func (v *InputStorePaymentPremiumGiveaway) Encode(b *bytes.Buffer) error {
 // DecodeInputStorePaymentPremiumGiveaway deserializes a InputStorePaymentPremiumGiveaway from a reader using the TL binary protocol.
 func DecodeInputStorePaymentPremiumGiveaway(r *Reader) (*InputStorePaymentPremiumGiveaway, error) {
 	v := &InputStorePaymentPremiumGiveaway{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.OnlyNewSubscribers = v.Flags.Has(0)
 	v.WinnersAreVisible = v.Flags.Has(3)
 	_objBoostPeer, _errBoostPeer := ReadTLObject(r)
 	if _errBoostPeer != nil {
 		return nil, _errBoostPeer
 	}
-	v.BoostPeer = _objBoostPeer.(InputPeerClass)
+	_cBoostPeer, _okBoostPeer := _objBoostPeer.(InputPeerClass)
+	if !_okBoostPeer {
+		return nil, fmt.Errorf("decode: field boost_peer: unexpected type %T", _objBoostPeer)
+	}
+	v.BoostPeer = _cBoostPeer
 	if v.Flags.Has(1) {
 		_vhdrAdditionalPeers, _ehdrAdditionalPeers := r.ReadUint32()
 		if _ehdrAdditionalPeers != nil {
 			return nil, _ehdrAdditionalPeers
+		}
+		if _errAdditionalPeers := checkVectorConstructor(_vhdrAdditionalPeers); _errAdditionalPeers != nil {
+			return nil, _errAdditionalPeers
 		}
 		_cntAdditionalPeers, _ecntAdditionalPeers := r.ReadUint32()
 		if _ecntAdditionalPeers != nil {
@@ -3033,9 +3290,12 @@ func DecodeInputStorePaymentPremiumGiveaway(r *Reader) (*InputStorePaymentPremiu
 			if _errAdditionalPeers != nil {
 				return nil, _errAdditionalPeers
 			}
-			v.AdditionalPeers[_iAdditionalPeers] = _objAdditionalPeers.(InputPeerClass)
+			_cAdditionalPeers, _okAdditionalPeers := _objAdditionalPeers.(InputPeerClass)
+			if !_okAdditionalPeers {
+				return nil, fmt.Errorf("decode: field additional_peers: unexpected type %T", _objAdditionalPeers)
+			}
+			v.AdditionalPeers[_iAdditionalPeers] = _cAdditionalPeers
 		}
-		_ = _vhdrAdditionalPeers
 	}
 	if v.Flags.Has(2) {
 		_vvCountriesIso2, _veCountriesIso2 := r.ReadVectorString()
@@ -3120,11 +3380,11 @@ func (v *InputStorePaymentStarsTopup) Encode(b *bytes.Buffer) error {
 // DecodeInputStorePaymentStarsTopup deserializes a InputStorePaymentStarsTopup from a reader using the TL binary protocol.
 func DecodeInputStorePaymentStarsTopup(r *Reader) (*InputStorePaymentStarsTopup, error) {
 	v := &InputStorePaymentStarsTopup{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rStars, _eStars := r.ReadInt64()
 	if _eStars != nil {
 		return nil, _eStars
@@ -3145,7 +3405,11 @@ func DecodeInputStorePaymentStarsTopup(r *Reader) (*InputStorePaymentStarsTopup,
 		if _errSpendPurposePeer != nil {
 			return nil, _errSpendPurposePeer
 		}
-		v.SpendPurposePeer = _objSpendPurposePeer.(InputPeerClass)
+		_cSpendPurposePeer, _okSpendPurposePeer := _objSpendPurposePeer.(InputPeerClass)
+		if !_okSpendPurposePeer {
+			return nil, fmt.Errorf("decode: field spend_purpose_peer: unexpected type %T", _objSpendPurposePeer)
+		}
+		v.SpendPurposePeer = _cSpendPurposePeer
 	}
 	return v, nil
 }
@@ -3188,7 +3452,11 @@ func DecodeInputStorePaymentStarsGift(r *Reader) (*InputStorePaymentStarsGift, e
 	if _errUserID != nil {
 		return nil, _errUserID
 	}
-	v.UserID = _objUserID.(InputUserClass)
+	_cUserID, _okUserID := _objUserID.(InputUserClass)
+	if !_okUserID {
+		return nil, fmt.Errorf("decode: field user_id: unexpected type %T", _objUserID)
+	}
+	v.UserID = _cUserID
 	_rStars, _eStars := r.ReadInt64()
 	if _eStars != nil {
 		return nil, _eStars
@@ -3287,11 +3555,11 @@ func (v *InputStorePaymentStarsGiveaway) Encode(b *bytes.Buffer) error {
 // DecodeInputStorePaymentStarsGiveaway deserializes a InputStorePaymentStarsGiveaway from a reader using the TL binary protocol.
 func DecodeInputStorePaymentStarsGiveaway(r *Reader) (*InputStorePaymentStarsGiveaway, error) {
 	v := &InputStorePaymentStarsGiveaway{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.OnlyNewSubscribers = v.Flags.Has(0)
 	v.WinnersAreVisible = v.Flags.Has(3)
 	_rStars, _eStars := r.ReadInt64()
@@ -3303,11 +3571,18 @@ func DecodeInputStorePaymentStarsGiveaway(r *Reader) (*InputStorePaymentStarsGiv
 	if _errBoostPeer != nil {
 		return nil, _errBoostPeer
 	}
-	v.BoostPeer = _objBoostPeer.(InputPeerClass)
+	_cBoostPeer, _okBoostPeer := _objBoostPeer.(InputPeerClass)
+	if !_okBoostPeer {
+		return nil, fmt.Errorf("decode: field boost_peer: unexpected type %T", _objBoostPeer)
+	}
+	v.BoostPeer = _cBoostPeer
 	if v.Flags.Has(1) {
 		_vhdrAdditionalPeers, _ehdrAdditionalPeers := r.ReadUint32()
 		if _ehdrAdditionalPeers != nil {
 			return nil, _ehdrAdditionalPeers
+		}
+		if _errAdditionalPeers := checkVectorConstructor(_vhdrAdditionalPeers); _errAdditionalPeers != nil {
+			return nil, _errAdditionalPeers
 		}
 		_cntAdditionalPeers, _ecntAdditionalPeers := r.ReadUint32()
 		if _ecntAdditionalPeers != nil {
@@ -3322,9 +3597,12 @@ func DecodeInputStorePaymentStarsGiveaway(r *Reader) (*InputStorePaymentStarsGiv
 			if _errAdditionalPeers != nil {
 				return nil, _errAdditionalPeers
 			}
-			v.AdditionalPeers[_iAdditionalPeers] = _objAdditionalPeers.(InputPeerClass)
+			_cAdditionalPeers, _okAdditionalPeers := _objAdditionalPeers.(InputPeerClass)
+			if !_okAdditionalPeers {
+				return nil, fmt.Errorf("decode: field additional_peers: unexpected type %T", _objAdditionalPeers)
+			}
+			v.AdditionalPeers[_iAdditionalPeers] = _cAdditionalPeers
 		}
-		_ = _vhdrAdditionalPeers
 	}
 	if v.Flags.Has(2) {
 		_vvCountriesIso2, _veCountriesIso2 := r.ReadVectorString()
@@ -3415,11 +3693,11 @@ func (v *InputStorePaymentAuthCode) Encode(b *bytes.Buffer) error {
 // DecodeInputStorePaymentAuthCode deserializes a InputStorePaymentAuthCode from a reader using the TL binary protocol.
 func DecodeInputStorePaymentAuthCode(r *Reader) (*InputStorePaymentAuthCode, error) {
 	v := &InputStorePaymentAuthCode{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Restore = v.Flags.Has(0)
 	_rPhoneNumber, _ePhoneNumber := r.ReadString()
 	if _ePhoneNumber != nil {
@@ -3561,11 +3839,11 @@ func (v *PremiumSubscriptionOption) Encode(b *bytes.Buffer) error {
 // DecodePremiumSubscriptionOption deserializes a PremiumSubscriptionOption from a reader using the TL binary protocol.
 func DecodePremiumSubscriptionOption(r *Reader) (*PremiumSubscriptionOption, error) {
 	v := &PremiumSubscriptionOption{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Current = v.Flags.Has(1)
 	v.CanPurchaseUpgrade = v.Flags.Has(2)
 	if v.Flags.Has(3) {
@@ -3663,11 +3941,11 @@ func (v *PremiumGiftCodeOption) Encode(b *bytes.Buffer) error {
 // DecodePremiumGiftCodeOption deserializes a PremiumGiftCodeOption from a reader using the TL binary protocol.
 func DecodePremiumGiftCodeOption(r *Reader) (*PremiumGiftCodeOption, error) {
 	v := &PremiumGiftCodeOption{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rUsers, _eUsers := r.ReadInt32()
 	if _eUsers != nil {
 		return nil, _eUsers
@@ -3789,18 +4067,22 @@ func (v *PaymentsCheckedGiftCode) Encode(b *bytes.Buffer) error {
 // DecodePaymentsCheckedGiftCode deserializes a PaymentsCheckedGiftCode from a reader using the TL binary protocol.
 func DecodePaymentsCheckedGiftCode(r *Reader) (*PaymentsCheckedGiftCode, error) {
 	v := &PaymentsCheckedGiftCode{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.ViaGiveaway = v.Flags.Has(2)
 	if v.Flags.Has(4) {
 		_objFromID, _errFromID := ReadTLObject(r)
 		if _errFromID != nil {
 			return nil, _errFromID
 		}
-		v.FromID = _objFromID.(PeerClass)
+		_cFromID, _okFromID := _objFromID.(PeerClass)
+		if !_okFromID {
+			return nil, fmt.Errorf("decode: field from_id: unexpected type %T", _objFromID)
+		}
+		v.FromID = _cFromID
 	}
 	if v.Flags.Has(3) {
 		_rGiveawayMsgID, _eGiveawayMsgID := r.ReadInt32()
@@ -3837,6 +4119,9 @@ func DecodePaymentsCheckedGiftCode(r *Reader) (*PaymentsCheckedGiftCode, error) 
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
 	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
+	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
 		return nil, _ecntChats
@@ -3850,12 +4135,18 @@ func DecodePaymentsCheckedGiftCode(r *Reader) (*PaymentsCheckedGiftCode, error) 
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -3870,9 +4161,12 @@ func DecodePaymentsCheckedGiftCode(r *Reader) (*PaymentsCheckedGiftCode, error) 
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -3960,11 +4254,11 @@ func (v *PaymentsGiveawayInfo) Encode(b *bytes.Buffer) error {
 // DecodePaymentsGiveawayInfo deserializes a PaymentsGiveawayInfo from a reader using the TL binary protocol.
 func DecodePaymentsGiveawayInfo(r *Reader) (*PaymentsGiveawayInfo, error) {
 	v := &PaymentsGiveawayInfo{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Participating = v.Flags.Has(0)
 	v.PreparingResults = v.Flags.Has(3)
 	_rStartDate, _eStartDate := r.ReadInt32()
@@ -4064,11 +4358,11 @@ func (v *PaymentsGiveawayInfoResults) Encode(b *bytes.Buffer) error {
 // DecodePaymentsGiveawayInfoResults deserializes a PaymentsGiveawayInfoResults from a reader using the TL binary protocol.
 func DecodePaymentsGiveawayInfoResults(r *Reader) (*PaymentsGiveawayInfoResults, error) {
 	v := &PaymentsGiveawayInfoResults{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Winner = v.Flags.Has(0)
 	v.Refunded = v.Flags.Has(1)
 	_rStartDate, _eStartDate := r.ReadInt32()
@@ -4340,11 +4634,11 @@ func (v *Boost) Encode(b *bytes.Buffer) error {
 // DecodeBoost deserializes a Boost from a reader using the TL binary protocol.
 func DecodeBoost(r *Reader) (*Boost, error) {
 	v := &Boost{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Gift = v.Flags.Has(1)
 	v.Giveaway = v.Flags.Has(2)
 	v.Unclaimed = v.Flags.Has(3)
@@ -4457,11 +4751,11 @@ func (v *MyBoost) Encode(b *bytes.Buffer) error {
 // DecodeMyBoost deserializes a MyBoost from a reader using the TL binary protocol.
 func DecodeMyBoost(r *Reader) (*MyBoost, error) {
 	v := &MyBoost{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rSlot, _eSlot := r.ReadInt32()
 	if _eSlot != nil {
 		return nil, _eSlot
@@ -4472,7 +4766,11 @@ func DecodeMyBoost(r *Reader) (*MyBoost, error) {
 		if _errPeer != nil {
 			return nil, _errPeer
 		}
-		v.Peer = _objPeer.(PeerClass)
+		_cPeer, _okPeer := _objPeer.(PeerClass)
+		if !_okPeer {
+			return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+		}
+		v.Peer = _cPeer
 	}
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
@@ -4547,11 +4845,11 @@ func (v *StarsTopupOption) Encode(b *bytes.Buffer) error {
 // DecodeStarsTopupOption deserializes a StarsTopupOption from a reader using the TL binary protocol.
 func DecodeStarsTopupOption(r *Reader) (*StarsTopupOption, error) {
 	v := &StarsTopupOption{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Extended = v.Flags.Has(1)
 	_rStars, _eStars := r.ReadInt64()
 	if _eStars != nil {
@@ -4815,11 +5113,11 @@ func (v *StarsTransaction) Encode(b *bytes.Buffer) error {
 // DecodeStarsTransaction deserializes a StarsTransaction from a reader using the TL binary protocol.
 func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 	v := &StarsTransaction{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Refund = v.Flags.Has(3)
 	v.Pending = v.Flags.Has(4)
 	v.Failed = v.Flags.Has(6)
@@ -4843,7 +5141,11 @@ func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 	if _errAmount != nil {
 		return nil, _errAmount
 	}
-	v.Amount = _objAmount.(StarsAmountClass)
+	_cAmount, _okAmount := _objAmount.(StarsAmountClass)
+	if !_okAmount {
+		return nil, fmt.Errorf("decode: field amount: unexpected type %T", _objAmount)
+	}
+	v.Amount = _cAmount
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -4853,7 +5155,11 @@ func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(StarsTransactionPeerClass)
+	_cPeer, _okPeer := _objPeer.(StarsTransactionPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(0) {
 		_rTitle, _eTitle := r.ReadString()
 		if _eTitle != nil {
@@ -4873,7 +5179,11 @@ func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 		if _errPhoto != nil {
 			return nil, _errPhoto
 		}
-		v.Photo = _objPhoto.(WebDocumentClass)
+		_cPhoto, _okPhoto := _objPhoto.(WebDocumentClass)
+		if !_okPhoto {
+			return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+		}
+		v.Photo = _cPhoto
 	}
 	if v.Flags.Has(5) {
 		_rTransactionDate, _eTransactionDate := r.ReadInt32()
@@ -4908,6 +5218,9 @@ func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 		if _ehdrExtendedMedia != nil {
 			return nil, _ehdrExtendedMedia
 		}
+		if _errExtendedMedia := checkVectorConstructor(_vhdrExtendedMedia); _errExtendedMedia != nil {
+			return nil, _errExtendedMedia
+		}
 		_cntExtendedMedia, _ecntExtendedMedia := r.ReadUint32()
 		if _ecntExtendedMedia != nil {
 			return nil, _ecntExtendedMedia
@@ -4921,9 +5234,12 @@ func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 			if _errExtendedMedia != nil {
 				return nil, _errExtendedMedia
 			}
-			v.ExtendedMedia[_iExtendedMedia] = _objExtendedMedia.(MessageMediaClass)
+			_cExtendedMedia, _okExtendedMedia := _objExtendedMedia.(MessageMediaClass)
+			if !_okExtendedMedia {
+				return nil, fmt.Errorf("decode: field extended_media: unexpected type %T", _objExtendedMedia)
+			}
+			v.ExtendedMedia[_iExtendedMedia] = _cExtendedMedia
 		}
-		_ = _vhdrExtendedMedia
 	}
 	if v.Flags.Has(12) {
 		_rSubscriptionPeriod, _eSubscriptionPeriod := r.ReadInt32()
@@ -4944,7 +5260,11 @@ func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 		if _errStargift != nil {
 			return nil, _errStargift
 		}
-		v.Stargift = _objStargift.(StarGiftClass)
+		_cStargift, _okStargift := _objStargift.(StarGiftClass)
+		if !_okStargift {
+			return nil, fmt.Errorf("decode: field stargift: unexpected type %T", _objStargift)
+		}
+		v.Stargift = _cStargift
 	}
 	if v.Flags.Has(15) {
 		_rFloodskipNumber, _eFloodskipNumber := r.ReadInt32()
@@ -4965,14 +5285,22 @@ func DecodeStarsTransaction(r *Reader) (*StarsTransaction, error) {
 		if _errStarrefPeer != nil {
 			return nil, _errStarrefPeer
 		}
-		v.StarrefPeer = _objStarrefPeer.(PeerClass)
+		_cStarrefPeer, _okStarrefPeer := _objStarrefPeer.(PeerClass)
+		if !_okStarrefPeer {
+			return nil, fmt.Errorf("decode: field starref_peer: unexpected type %T", _objStarrefPeer)
+		}
+		v.StarrefPeer = _cStarrefPeer
 	}
 	if v.Flags.Has(17) {
 		_objStarrefAmount, _errStarrefAmount := ReadTLObject(r)
 		if _errStarrefAmount != nil {
 			return nil, _errStarrefAmount
 		}
-		v.StarrefAmount = _objStarrefAmount.(StarsAmountClass)
+		_cStarrefAmount, _okStarrefAmount := _objStarrefAmount.(StarsAmountClass)
+		if !_okStarrefAmount {
+			return nil, fmt.Errorf("decode: field starref_amount: unexpected type %T", _objStarrefAmount)
+		}
+		v.StarrefAmount = _cStarrefAmount
 	}
 	if v.Flags.Has(19) {
 		_rPaidMessages, _ePaidMessages := r.ReadInt32()
@@ -5098,20 +5426,27 @@ func (v *PaymentsStarsStatus) Encode(b *bytes.Buffer) error {
 // DecodePaymentsStarsStatus deserializes a PaymentsStarsStatus from a reader using the TL binary protocol.
 func DecodePaymentsStarsStatus(r *Reader) (*PaymentsStarsStatus, error) {
 	v := &PaymentsStarsStatus{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objBalance, _errBalance := ReadTLObject(r)
 	if _errBalance != nil {
 		return nil, _errBalance
 	}
-	v.Balance = _objBalance.(StarsAmountClass)
+	_cBalance, _okBalance := _objBalance.(StarsAmountClass)
+	if !_okBalance {
+		return nil, fmt.Errorf("decode: field balance: unexpected type %T", _objBalance)
+	}
+	v.Balance = _cBalance
 	if v.Flags.Has(1) {
 		_vhdrSubscriptions, _ehdrSubscriptions := r.ReadUint32()
 		if _ehdrSubscriptions != nil {
 			return nil, _ehdrSubscriptions
+		}
+		if _errSubscriptions := checkVectorConstructor(_vhdrSubscriptions); _errSubscriptions != nil {
+			return nil, _errSubscriptions
 		}
 		_cntSubscriptions, _ecntSubscriptions := r.ReadUint32()
 		if _ecntSubscriptions != nil {
@@ -5126,9 +5461,12 @@ func DecodePaymentsStarsStatus(r *Reader) (*PaymentsStarsStatus, error) {
 			if _errSubscriptions != nil {
 				return nil, _errSubscriptions
 			}
-			v.Subscriptions[_iSubscriptions] = _objSubscriptions.(*StarsSubscription)
+			_cSubscriptions, _okSubscriptions := _objSubscriptions.(*StarsSubscription)
+			if !_okSubscriptions {
+				return nil, fmt.Errorf("decode: field subscriptions: unexpected type %T", _objSubscriptions)
+			}
+			v.Subscriptions[_iSubscriptions] = _cSubscriptions
 		}
-		_ = _vhdrSubscriptions
 	}
 	if v.Flags.Has(2) {
 		_rSubscriptionsNextOffset, _eSubscriptionsNextOffset := r.ReadString()
@@ -5149,6 +5487,9 @@ func DecodePaymentsStarsStatus(r *Reader) (*PaymentsStarsStatus, error) {
 		if _ehdrHistory != nil {
 			return nil, _ehdrHistory
 		}
+		if _errHistory := checkVectorConstructor(_vhdrHistory); _errHistory != nil {
+			return nil, _errHistory
+		}
 		_cntHistory, _ecntHistory := r.ReadUint32()
 		if _ecntHistory != nil {
 			return nil, _ecntHistory
@@ -5162,9 +5503,12 @@ func DecodePaymentsStarsStatus(r *Reader) (*PaymentsStarsStatus, error) {
 			if _errHistory != nil {
 				return nil, _errHistory
 			}
-			v.History[_iHistory] = _objHistory.(*StarsTransaction)
+			_cHistory, _okHistory := _objHistory.(*StarsTransaction)
+			if !_okHistory {
+				return nil, fmt.Errorf("decode: field history: unexpected type %T", _objHistory)
+			}
+			v.History[_iHistory] = _cHistory
 		}
-		_ = _vhdrHistory
 	}
 	if v.Flags.Has(0) {
 		_rNextOffset, _eNextOffset := r.ReadString()
@@ -5176,6 +5520,9 @@ func DecodePaymentsStarsStatus(r *Reader) (*PaymentsStarsStatus, error) {
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -5190,12 +5537,18 @@ func DecodePaymentsStarsStatus(r *Reader) (*PaymentsStarsStatus, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -5210,9 +5563,12 @@ func DecodePaymentsStarsStatus(r *Reader) (*PaymentsStarsStatus, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -5269,27 +5625,39 @@ func (v *StarsRevenueStatus) Encode(b *bytes.Buffer) error {
 // DecodeStarsRevenueStatus deserializes a StarsRevenueStatus from a reader using the TL binary protocol.
 func DecodeStarsRevenueStatus(r *Reader) (*StarsRevenueStatus, error) {
 	v := &StarsRevenueStatus{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.WithdrawalEnabled = v.Flags.Has(0)
 	_objCurrentBalance, _errCurrentBalance := ReadTLObject(r)
 	if _errCurrentBalance != nil {
 		return nil, _errCurrentBalance
 	}
-	v.CurrentBalance = _objCurrentBalance.(StarsAmountClass)
+	_cCurrentBalance, _okCurrentBalance := _objCurrentBalance.(StarsAmountClass)
+	if !_okCurrentBalance {
+		return nil, fmt.Errorf("decode: field current_balance: unexpected type %T", _objCurrentBalance)
+	}
+	v.CurrentBalance = _cCurrentBalance
 	_objAvailableBalance, _errAvailableBalance := ReadTLObject(r)
 	if _errAvailableBalance != nil {
 		return nil, _errAvailableBalance
 	}
-	v.AvailableBalance = _objAvailableBalance.(StarsAmountClass)
+	_cAvailableBalance, _okAvailableBalance := _objAvailableBalance.(StarsAmountClass)
+	if !_okAvailableBalance {
+		return nil, fmt.Errorf("decode: field available_balance: unexpected type %T", _objAvailableBalance)
+	}
+	v.AvailableBalance = _cAvailableBalance
 	_objOverallRevenue, _errOverallRevenue := ReadTLObject(r)
 	if _errOverallRevenue != nil {
 		return nil, _errOverallRevenue
 	}
-	v.OverallRevenue = _objOverallRevenue.(StarsAmountClass)
+	_cOverallRevenue, _okOverallRevenue := _objOverallRevenue.(StarsAmountClass)
+	if !_okOverallRevenue {
+		return nil, fmt.Errorf("decode: field overall_revenue: unexpected type %T", _objOverallRevenue)
+	}
+	v.OverallRevenue = _cOverallRevenue
 	if v.Flags.Has(1) {
 		_rNextWithdrawalAt, _eNextWithdrawalAt := r.ReadInt32()
 		if _eNextWithdrawalAt != nil {
@@ -5349,28 +5717,40 @@ func (v *PaymentsStarsRevenueStats) Encode(b *bytes.Buffer) error {
 // DecodePaymentsStarsRevenueStats deserializes a PaymentsStarsRevenueStats from a reader using the TL binary protocol.
 func DecodePaymentsStarsRevenueStats(r *Reader) (*PaymentsStarsRevenueStats, error) {
 	v := &PaymentsStarsRevenueStats{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_objTopHoursGraph, _errTopHoursGraph := ReadTLObject(r)
 		if _errTopHoursGraph != nil {
 			return nil, _errTopHoursGraph
 		}
-		v.TopHoursGraph = _objTopHoursGraph.(StatsGraphClass)
+		_cTopHoursGraph, _okTopHoursGraph := _objTopHoursGraph.(StatsGraphClass)
+		if !_okTopHoursGraph {
+			return nil, fmt.Errorf("decode: field top_hours_graph: unexpected type %T", _objTopHoursGraph)
+		}
+		v.TopHoursGraph = _cTopHoursGraph
 	}
 	_objRevenueGraph, _errRevenueGraph := ReadTLObject(r)
 	if _errRevenueGraph != nil {
 		return nil, _errRevenueGraph
 	}
-	v.RevenueGraph = _objRevenueGraph.(StatsGraphClass)
+	_cRevenueGraph, _okRevenueGraph := _objRevenueGraph.(StatsGraphClass)
+	if !_okRevenueGraph {
+		return nil, fmt.Errorf("decode: field revenue_graph: unexpected type %T", _objRevenueGraph)
+	}
+	v.RevenueGraph = _cRevenueGraph
 	_objStatus, _errStatus := ReadTLObject(r)
 	if _errStatus != nil {
 		return nil, _errStatus
 	}
-	v.Status = _objStatus.(*StarsRevenueStatus)
+	_cStatus, _okStatus := _objStatus.(*StarsRevenueStatus)
+	if !_okStatus {
+		return nil, fmt.Errorf("decode: field status: unexpected type %T", _objStatus)
+	}
+	v.Status = _cStatus
 	_rUsdRate, _eUsdRate := r.ReadFloat64()
 	if _eUsdRate != nil {
 		return nil, _eUsdRate
@@ -5499,11 +5879,11 @@ func (v *InputStarsTransaction) Encode(b *bytes.Buffer) error {
 // DecodeInputStarsTransaction deserializes a InputStarsTransaction from a reader using the TL binary protocol.
 func DecodeInputStarsTransaction(r *Reader) (*InputStarsTransaction, error) {
 	v := &InputStarsTransaction{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Refund = v.Flags.Has(0)
 	_rID, _eID := r.ReadString()
 	if _eID != nil {
@@ -5566,11 +5946,11 @@ func (v *StarsGiftOption) Encode(b *bytes.Buffer) error {
 // DecodeStarsGiftOption deserializes a StarsGiftOption from a reader using the TL binary protocol.
 func DecodeStarsGiftOption(r *Reader) (*StarsGiftOption, error) {
 	v := &StarsGiftOption{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Extended = v.Flags.Has(1)
 	_rStars, _eStars := r.ReadInt64()
 	if _eStars != nil {
@@ -5731,11 +6111,11 @@ func (v *StarsSubscription) Encode(b *bytes.Buffer) error {
 // DecodeStarsSubscription deserializes a StarsSubscription from a reader using the TL binary protocol.
 func DecodeStarsSubscription(r *Reader) (*StarsSubscription, error) {
 	v := &StarsSubscription{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Canceled = v.Flags.Has(0)
 	v.CanRefulfill = v.Flags.Has(1)
 	v.MissingBalance = v.Flags.Has(2)
@@ -5749,7 +6129,11 @@ func DecodeStarsSubscription(r *Reader) (*StarsSubscription, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rUntilDate, _eUntilDate := r.ReadInt32()
 	if _eUntilDate != nil {
 		return nil, _eUntilDate
@@ -5759,7 +6143,11 @@ func DecodeStarsSubscription(r *Reader) (*StarsSubscription, error) {
 	if _errPricing != nil {
 		return nil, _errPricing
 	}
-	v.Pricing = _objPricing.(*StarsSubscriptionPricing)
+	_cPricing, _okPricing := _objPricing.(*StarsSubscriptionPricing)
+	if !_okPricing {
+		return nil, fmt.Errorf("decode: field pricing: unexpected type %T", _objPricing)
+	}
+	v.Pricing = _cPricing
 	if v.Flags.Has(3) {
 		_rChatInviteHash, _eChatInviteHash := r.ReadString()
 		if _eChatInviteHash != nil {
@@ -5779,7 +6167,11 @@ func DecodeStarsSubscription(r *Reader) (*StarsSubscription, error) {
 		if _errPhoto != nil {
 			return nil, _errPhoto
 		}
-		v.Photo = _objPhoto.(WebDocumentClass)
+		_cPhoto, _okPhoto := _objPhoto.(WebDocumentClass)
+		if !_okPhoto {
+			return nil, fmt.Errorf("decode: field photo: unexpected type %T", _objPhoto)
+		}
+		v.Photo = _cPhoto
 	}
 	if v.Flags.Has(6) {
 		_rInvoiceSlug, _eInvoiceSlug := r.ReadString()
@@ -5856,11 +6248,11 @@ func (v *StarsGiveawayOption) Encode(b *bytes.Buffer) error {
 // DecodeStarsGiveawayOption deserializes a StarsGiveawayOption from a reader using the TL binary protocol.
 func DecodeStarsGiveawayOption(r *Reader) (*StarsGiveawayOption, error) {
 	v := &StarsGiveawayOption{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Extended = v.Flags.Has(0)
 	v.Default = v.Flags.Has(1)
 	_rStars, _eStars := r.ReadInt64()
@@ -5894,6 +6286,9 @@ func DecodeStarsGiveawayOption(r *Reader) (*StarsGiveawayOption, error) {
 	if _ehdrWinners != nil {
 		return nil, _ehdrWinners
 	}
+	if _errWinners := checkVectorConstructor(_vhdrWinners); _errWinners != nil {
+		return nil, _errWinners
+	}
 	_cntWinners, _ecntWinners := r.ReadUint32()
 	if _ecntWinners != nil {
 		return nil, _ecntWinners
@@ -5907,9 +6302,12 @@ func DecodeStarsGiveawayOption(r *Reader) (*StarsGiveawayOption, error) {
 		if _errWinners != nil {
 			return nil, _errWinners
 		}
-		v.Winners[_iWinners] = _objWinners.(*StarsGiveawayWinnersOption)
+		_cWinners, _okWinners := _objWinners.(*StarsGiveawayWinnersOption)
+		if !_okWinners {
+			return nil, fmt.Errorf("decode: field winners: unexpected type %T", _objWinners)
+		}
+		v.Winners[_iWinners] = _cWinners
 	}
-	_ = _vhdrWinners
 	return v, nil
 }
 
@@ -5957,11 +6355,11 @@ func (v *StarsGiveawayWinnersOption) Encode(b *bytes.Buffer) error {
 // DecodeStarsGiveawayWinnersOption deserializes a StarsGiveawayWinnersOption from a reader using the TL binary protocol.
 func DecodeStarsGiveawayWinnersOption(r *Reader) (*StarsGiveawayWinnersOption, error) {
 	v := &StarsGiveawayWinnersOption{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Default = v.Flags.Has(0)
 	_rUsers, _eUsers := r.ReadInt32()
 	if _eUsers != nil {
@@ -6184,11 +6582,11 @@ func (v *StarGift) Encode(b *bytes.Buffer) error {
 // DecodeStarGift deserializes a StarGift from a reader using the TL binary protocol.
 func DecodeStarGift(r *Reader) (*StarGift, error) {
 	v := &StarGift{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Limited = v.Flags.Has(0)
 	v.SoldOut = v.Flags.Has(1)
 	v.Birthday = v.Flags.Has(2)
@@ -6205,7 +6603,11 @@ func DecodeStarGift(r *Reader) (*StarGift, error) {
 	if _errSticker != nil {
 		return nil, _errSticker
 	}
-	v.Sticker = _objSticker.(DocumentClass)
+	_cSticker, _okSticker := _objSticker.(DocumentClass)
+	if !_okSticker {
+		return nil, fmt.Errorf("decode: field sticker: unexpected type %T", _objSticker)
+	}
+	v.Sticker = _cSticker
 	_rStars, _eStars := r.ReadInt64()
 	if _eStars != nil {
 		return nil, _eStars
@@ -6277,7 +6679,11 @@ func DecodeStarGift(r *Reader) (*StarGift, error) {
 		if _errReleasedBy != nil {
 			return nil, _errReleasedBy
 		}
-		v.ReleasedBy = _objReleasedBy.(PeerClass)
+		_cReleasedBy, _okReleasedBy := _objReleasedBy.(PeerClass)
+		if !_okReleasedBy {
+			return nil, fmt.Errorf("decode: field released_by: unexpected type %T", _objReleasedBy)
+		}
+		v.ReleasedBy = _cReleasedBy
 	}
 	if v.Flags.Has(8) {
 		_rPerUserTotal, _ePerUserTotal := r.ReadInt32()
@@ -6333,7 +6739,11 @@ func DecodeStarGift(r *Reader) (*StarGift, error) {
 		if _errBackground != nil {
 			return nil, _errBackground
 		}
-		v.Background = _objBackground.(*StarGiftBackground)
+		_cBackground, _okBackground := _objBackground.(*StarGiftBackground)
+		if !_okBackground {
+			return nil, fmt.Errorf("decode: field background: unexpected type %T", _objBackground)
+		}
+		v.Background = _cBackground
 	}
 	return v, nil
 }
@@ -6513,11 +6923,11 @@ func (v *StarGiftUnique) Encode(b *bytes.Buffer) error {
 // DecodeStarGiftUnique deserializes a StarGiftUnique from a reader using the TL binary protocol.
 func DecodeStarGiftUnique(r *Reader) (*StarGiftUnique, error) {
 	v := &StarGiftUnique{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.RequirePremium = v.Flags.Has(6)
 	v.ResaleTonOnly = v.Flags.Has(7)
 	v.ThemeAvailable = v.Flags.Has(9)
@@ -6553,7 +6963,11 @@ func DecodeStarGiftUnique(r *Reader) (*StarGiftUnique, error) {
 		if _errOwnerID != nil {
 			return nil, _errOwnerID
 		}
-		v.OwnerID = _objOwnerID.(PeerClass)
+		_cOwnerID, _okOwnerID := _objOwnerID.(PeerClass)
+		if !_okOwnerID {
+			return nil, fmt.Errorf("decode: field owner_id: unexpected type %T", _objOwnerID)
+		}
+		v.OwnerID = _cOwnerID
 	}
 	if v.Flags.Has(1) {
 		_rOwnerName, _eOwnerName := r.ReadString()
@@ -6573,6 +6987,9 @@ func DecodeStarGiftUnique(r *Reader) (*StarGiftUnique, error) {
 	if _ehdrAttributes != nil {
 		return nil, _ehdrAttributes
 	}
+	if _errAttributes := checkVectorConstructor(_vhdrAttributes); _errAttributes != nil {
+		return nil, _errAttributes
+	}
 	_cntAttributes, _ecntAttributes := r.ReadUint32()
 	if _ecntAttributes != nil {
 		return nil, _ecntAttributes
@@ -6586,9 +7003,12 @@ func DecodeStarGiftUnique(r *Reader) (*StarGiftUnique, error) {
 		if _errAttributes != nil {
 			return nil, _errAttributes
 		}
-		v.Attributes[_iAttributes] = _objAttributes.(StarGiftAttributeClass)
+		_cAttributes, _okAttributes := _objAttributes.(StarGiftAttributeClass)
+		if !_okAttributes {
+			return nil, fmt.Errorf("decode: field attributes: unexpected type %T", _objAttributes)
+		}
+		v.Attributes[_iAttributes] = _cAttributes
 	}
-	_ = _vhdrAttributes
 	_rAvailabilityIssued, _eAvailabilityIssued := r.ReadInt32()
 	if _eAvailabilityIssued != nil {
 		return nil, _eAvailabilityIssued
@@ -6611,6 +7031,9 @@ func DecodeStarGiftUnique(r *Reader) (*StarGiftUnique, error) {
 		if _ehdrResellAmount != nil {
 			return nil, _ehdrResellAmount
 		}
+		if _errResellAmount := checkVectorConstructor(_vhdrResellAmount); _errResellAmount != nil {
+			return nil, _errResellAmount
+		}
 		_cntResellAmount, _ecntResellAmount := r.ReadUint32()
 		if _ecntResellAmount != nil {
 			return nil, _ecntResellAmount
@@ -6624,16 +7047,23 @@ func DecodeStarGiftUnique(r *Reader) (*StarGiftUnique, error) {
 			if _errResellAmount != nil {
 				return nil, _errResellAmount
 			}
-			v.ResellAmount[_iResellAmount] = _objResellAmount.(StarsAmountClass)
+			_cResellAmount, _okResellAmount := _objResellAmount.(StarsAmountClass)
+			if !_okResellAmount {
+				return nil, fmt.Errorf("decode: field resell_amount: unexpected type %T", _objResellAmount)
+			}
+			v.ResellAmount[_iResellAmount] = _cResellAmount
 		}
-		_ = _vhdrResellAmount
 	}
 	if v.Flags.Has(5) {
 		_objReleasedBy, _errReleasedBy := ReadTLObject(r)
 		if _errReleasedBy != nil {
 			return nil, _errReleasedBy
 		}
-		v.ReleasedBy = _objReleasedBy.(PeerClass)
+		_cReleasedBy, _okReleasedBy := _objReleasedBy.(PeerClass)
+		if !_okReleasedBy {
+			return nil, fmt.Errorf("decode: field released_by: unexpected type %T", _objReleasedBy)
+		}
+		v.ReleasedBy = _cReleasedBy
 	}
 	if v.Flags.Has(8) {
 		_rValueAmount, _eValueAmount := r.ReadInt64()
@@ -6661,21 +7091,33 @@ func DecodeStarGiftUnique(r *Reader) (*StarGiftUnique, error) {
 		if _errThemePeer != nil {
 			return nil, _errThemePeer
 		}
-		v.ThemePeer = _objThemePeer.(PeerClass)
+		_cThemePeer, _okThemePeer := _objThemePeer.(PeerClass)
+		if !_okThemePeer {
+			return nil, fmt.Errorf("decode: field theme_peer: unexpected type %T", _objThemePeer)
+		}
+		v.ThemePeer = _cThemePeer
 	}
 	if v.Flags.Has(11) {
 		_objPeerColor, _errPeerColor := ReadTLObject(r)
 		if _errPeerColor != nil {
 			return nil, _errPeerColor
 		}
-		v.PeerColor = _objPeerColor.(PeerColorClass)
+		_cPeerColor, _okPeerColor := _objPeerColor.(PeerColorClass)
+		if !_okPeerColor {
+			return nil, fmt.Errorf("decode: field peer_color: unexpected type %T", _objPeerColor)
+		}
+		v.PeerColor = _cPeerColor
 	}
 	if v.Flags.Has(12) {
 		_objHostID, _errHostID := ReadTLObject(r)
 		if _errHostID != nil {
 			return nil, _errHostID
 		}
-		v.HostID = _objHostID.(PeerClass)
+		_cHostID, _okHostID := _objHostID.(PeerClass)
+		if !_okHostID {
+			return nil, fmt.Errorf("decode: field host_id: unexpected type %T", _objHostID)
+		}
+		v.HostID = _cHostID
 	}
 	if v.Flags.Has(13) {
 		_rOfferMinStars, _eOfferMinStars := r.ReadInt32()
@@ -6798,6 +7240,9 @@ func DecodePaymentsStarGifts(r *Reader) (*PaymentsStarGifts, error) {
 	if _ehdrGifts != nil {
 		return nil, _ehdrGifts
 	}
+	if _errGifts := checkVectorConstructor(_vhdrGifts); _errGifts != nil {
+		return nil, _errGifts
+	}
 	_cntGifts, _ecntGifts := r.ReadUint32()
 	if _ecntGifts != nil {
 		return nil, _ecntGifts
@@ -6811,12 +7256,18 @@ func DecodePaymentsStarGifts(r *Reader) (*PaymentsStarGifts, error) {
 		if _errGifts != nil {
 			return nil, _errGifts
 		}
-		v.Gifts[_iGifts] = _objGifts.(StarGiftClass)
+		_cGifts, _okGifts := _objGifts.(StarGiftClass)
+		if !_okGifts {
+			return nil, fmt.Errorf("decode: field gifts: unexpected type %T", _objGifts)
+		}
+		v.Gifts[_iGifts] = _cGifts
 	}
-	_ = _vhdrGifts
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -6831,12 +7282,18 @@ func DecodePaymentsStarGifts(r *Reader) (*PaymentsStarGifts, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -6851,9 +7308,12 @@ func DecodePaymentsStarGifts(r *Reader) (*PaymentsStarGifts, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -6918,11 +7378,11 @@ func (v *StarRefProgram) Encode(b *bytes.Buffer) error {
 // DecodeStarRefProgram deserializes a StarRefProgram from a reader using the TL binary protocol.
 func DecodeStarRefProgram(r *Reader) (*StarRefProgram, error) {
 	v := &StarRefProgram{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rBotID, _eBotID := r.ReadInt64()
 	if _eBotID != nil {
 		return nil, _eBotID
@@ -6952,7 +7412,11 @@ func DecodeStarRefProgram(r *Reader) (*StarRefProgram, error) {
 		if _errDailyRevenuePerUser != nil {
 			return nil, _errDailyRevenuePerUser
 		}
-		v.DailyRevenuePerUser = _objDailyRevenuePerUser.(StarsAmountClass)
+		_cDailyRevenuePerUser, _okDailyRevenuePerUser := _objDailyRevenuePerUser.(StarsAmountClass)
+		if !_okDailyRevenuePerUser {
+			return nil, fmt.Errorf("decode: field daily_revenue_per_user: unexpected type %T", _objDailyRevenuePerUser)
+		}
+		v.DailyRevenuePerUser = _cDailyRevenuePerUser
 	}
 	return v, nil
 }
@@ -7009,6 +7473,9 @@ func DecodePaymentsConnectedStarRefBots(r *Reader) (*PaymentsConnectedStarRefBot
 	if _ehdrConnectedBots != nil {
 		return nil, _ehdrConnectedBots
 	}
+	if _errConnectedBots := checkVectorConstructor(_vhdrConnectedBots); _errConnectedBots != nil {
+		return nil, _errConnectedBots
+	}
 	_cntConnectedBots, _ecntConnectedBots := r.ReadUint32()
 	if _ecntConnectedBots != nil {
 		return nil, _ecntConnectedBots
@@ -7022,12 +7489,18 @@ func DecodePaymentsConnectedStarRefBots(r *Reader) (*PaymentsConnectedStarRefBot
 		if _errConnectedBots != nil {
 			return nil, _errConnectedBots
 		}
-		v.ConnectedBots[_iConnectedBots] = _objConnectedBots.(*ConnectedBotStarRef)
+		_cConnectedBots, _okConnectedBots := _objConnectedBots.(*ConnectedBotStarRef)
+		if !_okConnectedBots {
+			return nil, fmt.Errorf("decode: field connected_bots: unexpected type %T", _objConnectedBots)
+		}
+		v.ConnectedBots[_iConnectedBots] = _cConnectedBots
 	}
-	_ = _vhdrConnectedBots
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -7042,9 +7515,12 @@ func DecodePaymentsConnectedStarRefBots(r *Reader) (*PaymentsConnectedStarRefBot
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -7105,11 +7581,11 @@ func (v *PaymentsSuggestedStarRefBots) Encode(b *bytes.Buffer) error {
 // DecodePaymentsSuggestedStarRefBots deserializes a PaymentsSuggestedStarRefBots from a reader using the TL binary protocol.
 func DecodePaymentsSuggestedStarRefBots(r *Reader) (*PaymentsSuggestedStarRefBots, error) {
 	v := &PaymentsSuggestedStarRefBots{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -7118,6 +7594,9 @@ func DecodePaymentsSuggestedStarRefBots(r *Reader) (*PaymentsSuggestedStarRefBot
 	_vhdrSuggestedBots, _ehdrSuggestedBots := r.ReadUint32()
 	if _ehdrSuggestedBots != nil {
 		return nil, _ehdrSuggestedBots
+	}
+	if _errSuggestedBots := checkVectorConstructor(_vhdrSuggestedBots); _errSuggestedBots != nil {
+		return nil, _errSuggestedBots
 	}
 	_cntSuggestedBots, _ecntSuggestedBots := r.ReadUint32()
 	if _ecntSuggestedBots != nil {
@@ -7132,12 +7611,18 @@ func DecodePaymentsSuggestedStarRefBots(r *Reader) (*PaymentsSuggestedStarRefBot
 		if _errSuggestedBots != nil {
 			return nil, _errSuggestedBots
 		}
-		v.SuggestedBots[_iSuggestedBots] = _objSuggestedBots.(*StarRefProgram)
+		_cSuggestedBots, _okSuggestedBots := _objSuggestedBots.(*StarRefProgram)
+		if !_okSuggestedBots {
+			return nil, fmt.Errorf("decode: field suggested_bots: unexpected type %T", _objSuggestedBots)
+		}
+		v.SuggestedBots[_iSuggestedBots] = _cSuggestedBots
 	}
-	_ = _vhdrSuggestedBots
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -7152,9 +7637,12 @@ func DecodePaymentsSuggestedStarRefBots(r *Reader) (*PaymentsSuggestedStarRefBot
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	if v.Flags.Has(0) {
 		_rNextOffset, _eNextOffset := r.ReadString()
 		if _eNextOffset != nil {
@@ -7339,11 +7827,11 @@ func (v *StarGiftAttributeModel) Encode(b *bytes.Buffer) error {
 // DecodeStarGiftAttributeModel deserializes a StarGiftAttributeModel from a reader using the TL binary protocol.
 func DecodeStarGiftAttributeModel(r *Reader) (*StarGiftAttributeModel, error) {
 	v := &StarGiftAttributeModel{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Crafted = v.Flags.Has(0)
 	_rName, _eName := r.ReadString()
 	if _eName != nil {
@@ -7354,12 +7842,20 @@ func DecodeStarGiftAttributeModel(r *Reader) (*StarGiftAttributeModel, error) {
 	if _errDocument != nil {
 		return nil, _errDocument
 	}
-	v.Document = _objDocument.(DocumentClass)
+	_cDocument, _okDocument := _objDocument.(DocumentClass)
+	if !_okDocument {
+		return nil, fmt.Errorf("decode: field document: unexpected type %T", _objDocument)
+	}
+	v.Document = _cDocument
 	_objRarity, _errRarity := ReadTLObject(r)
 	if _errRarity != nil {
 		return nil, _errRarity
 	}
-	v.Rarity = _objRarity.(StarGiftAttributeRarityClass)
+	_cRarity, _okRarity := _objRarity.(StarGiftAttributeRarityClass)
+	if !_okRarity {
+		return nil, fmt.Errorf("decode: field rarity: unexpected type %T", _objRarity)
+	}
+	v.Rarity = _cRarity
 	return v, nil
 }
 
@@ -7404,12 +7900,20 @@ func DecodeStarGiftAttributePattern(r *Reader) (*StarGiftAttributePattern, error
 	if _errDocument != nil {
 		return nil, _errDocument
 	}
-	v.Document = _objDocument.(DocumentClass)
+	_cDocument, _okDocument := _objDocument.(DocumentClass)
+	if !_okDocument {
+		return nil, fmt.Errorf("decode: field document: unexpected type %T", _objDocument)
+	}
+	v.Document = _cDocument
 	_objRarity, _errRarity := ReadTLObject(r)
 	if _errRarity != nil {
 		return nil, _errRarity
 	}
-	v.Rarity = _objRarity.(StarGiftAttributeRarityClass)
+	_cRarity, _okRarity := _objRarity.(StarGiftAttributeRarityClass)
+	if !_okRarity {
+		return nil, fmt.Errorf("decode: field rarity: unexpected type %T", _objRarity)
+	}
+	v.Rarity = _cRarity
 	return v, nil
 }
 
@@ -7487,7 +7991,11 @@ func DecodeStarGiftAttributeBackdrop(r *Reader) (*StarGiftAttributeBackdrop, err
 	if _errRarity != nil {
 		return nil, _errRarity
 	}
-	v.Rarity = _objRarity.(StarGiftAttributeRarityClass)
+	_cRarity, _okRarity := _objRarity.(StarGiftAttributeRarityClass)
+	if !_okRarity {
+		return nil, fmt.Errorf("decode: field rarity: unexpected type %T", _objRarity)
+	}
+	v.Rarity = _cRarity
 	return v, nil
 }
 
@@ -7542,23 +8050,31 @@ func (v *StarGiftAttributeOriginalDetails) Encode(b *bytes.Buffer) error {
 // DecodeStarGiftAttributeOriginalDetails deserializes a StarGiftAttributeOriginalDetails from a reader using the TL binary protocol.
 func DecodeStarGiftAttributeOriginalDetails(r *Reader) (*StarGiftAttributeOriginalDetails, error) {
 	v := &StarGiftAttributeOriginalDetails{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_objSenderID, _errSenderID := ReadTLObject(r)
 		if _errSenderID != nil {
 			return nil, _errSenderID
 		}
-		v.SenderID = _objSenderID.(PeerClass)
+		_cSenderID, _okSenderID := _objSenderID.(PeerClass)
+		if !_okSenderID {
+			return nil, fmt.Errorf("decode: field sender_id: unexpected type %T", _objSenderID)
+		}
+		v.SenderID = _cSenderID
 	}
 	_objRecipientID, _errRecipientID := ReadTLObject(r)
 	if _errRecipientID != nil {
 		return nil, _errRecipientID
 	}
-	v.RecipientID = _objRecipientID.(PeerClass)
+	_cRecipientID, _okRecipientID := _objRecipientID.(PeerClass)
+	if !_okRecipientID {
+		return nil, fmt.Errorf("decode: field recipient_id: unexpected type %T", _objRecipientID)
+	}
+	v.RecipientID = _cRecipientID
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -7569,7 +8085,11 @@ func DecodeStarGiftAttributeOriginalDetails(r *Reader) (*StarGiftAttributeOrigin
 		if _errMessage != nil {
 			return nil, _errMessage
 		}
-		v.Message = _objMessage.(*TextWithEntities)
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	return v, nil
 }
@@ -7625,6 +8145,9 @@ func DecodePaymentsStarGiftUpgradePreview(r *Reader) (*PaymentsStarGiftUpgradePr
 	if _ehdrSampleAttributes != nil {
 		return nil, _ehdrSampleAttributes
 	}
+	if _errSampleAttributes := checkVectorConstructor(_vhdrSampleAttributes); _errSampleAttributes != nil {
+		return nil, _errSampleAttributes
+	}
 	_cntSampleAttributes, _ecntSampleAttributes := r.ReadUint32()
 	if _ecntSampleAttributes != nil {
 		return nil, _ecntSampleAttributes
@@ -7638,12 +8161,18 @@ func DecodePaymentsStarGiftUpgradePreview(r *Reader) (*PaymentsStarGiftUpgradePr
 		if _errSampleAttributes != nil {
 			return nil, _errSampleAttributes
 		}
-		v.SampleAttributes[_iSampleAttributes] = _objSampleAttributes.(StarGiftAttributeClass)
+		_cSampleAttributes, _okSampleAttributes := _objSampleAttributes.(StarGiftAttributeClass)
+		if !_okSampleAttributes {
+			return nil, fmt.Errorf("decode: field sample_attributes: unexpected type %T", _objSampleAttributes)
+		}
+		v.SampleAttributes[_iSampleAttributes] = _cSampleAttributes
 	}
-	_ = _vhdrSampleAttributes
 	_vhdrPrices, _ehdrPrices := r.ReadUint32()
 	if _ehdrPrices != nil {
 		return nil, _ehdrPrices
+	}
+	if _errPrices := checkVectorConstructor(_vhdrPrices); _errPrices != nil {
+		return nil, _errPrices
 	}
 	_cntPrices, _ecntPrices := r.ReadUint32()
 	if _ecntPrices != nil {
@@ -7658,12 +8187,18 @@ func DecodePaymentsStarGiftUpgradePreview(r *Reader) (*PaymentsStarGiftUpgradePr
 		if _errPrices != nil {
 			return nil, _errPrices
 		}
-		v.Prices[_iPrices] = _objPrices.(*StarGiftUpgradePrice)
+		_cPrices, _okPrices := _objPrices.(*StarGiftUpgradePrice)
+		if !_okPrices {
+			return nil, fmt.Errorf("decode: field prices: unexpected type %T", _objPrices)
+		}
+		v.Prices[_iPrices] = _cPrices
 	}
-	_ = _vhdrPrices
 	_vhdrNextPrices, _ehdrNextPrices := r.ReadUint32()
 	if _ehdrNextPrices != nil {
 		return nil, _ehdrNextPrices
+	}
+	if _errNextPrices := checkVectorConstructor(_vhdrNextPrices); _errNextPrices != nil {
+		return nil, _errNextPrices
 	}
 	_cntNextPrices, _ecntNextPrices := r.ReadUint32()
 	if _ecntNextPrices != nil {
@@ -7678,9 +8213,12 @@ func DecodePaymentsStarGiftUpgradePreview(r *Reader) (*PaymentsStarGiftUpgradePr
 		if _errNextPrices != nil {
 			return nil, _errNextPrices
 		}
-		v.NextPrices[_iNextPrices] = _objNextPrices.(*StarGiftUpgradePrice)
+		_cNextPrices, _okNextPrices := _objNextPrices.(*StarGiftUpgradePrice)
+		if !_okNextPrices {
+			return nil, fmt.Errorf("decode: field next_prices: unexpected type %T", _objNextPrices)
+		}
+		v.NextPrices[_iNextPrices] = _cNextPrices
 	}
-	_ = _vhdrNextPrices
 	return v, nil
 }
 
@@ -7731,10 +8269,17 @@ func DecodePaymentsUniqueStarGift(r *Reader) (*PaymentsUniqueStarGift, error) {
 	if _errGift != nil {
 		return nil, _errGift
 	}
-	v.Gift = _objGift.(StarGiftClass)
+	_cGift, _okGift := _objGift.(StarGiftClass)
+	if !_okGift {
+		return nil, fmt.Errorf("decode: field gift: unexpected type %T", _objGift)
+	}
+	v.Gift = _cGift
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -7749,12 +8294,18 @@ func DecodePaymentsUniqueStarGift(r *Reader) (*PaymentsUniqueStarGift, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -7769,9 +8320,12 @@ func DecodePaymentsUniqueStarGift(r *Reader) (*PaymentsUniqueStarGift, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -7944,11 +8498,11 @@ func (v *SavedStarGift) Encode(b *bytes.Buffer) error {
 // DecodeSavedStarGift deserializes a SavedStarGift from a reader using the TL binary protocol.
 func DecodeSavedStarGift(r *Reader) (*SavedStarGift, error) {
 	v := &SavedStarGift{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.NameHidden = v.Flags.Has(0)
 	v.Unsaved = v.Flags.Has(5)
 	v.Refunded = v.Flags.Has(9)
@@ -7960,7 +8514,11 @@ func DecodeSavedStarGift(r *Reader) (*SavedStarGift, error) {
 		if _errFromID != nil {
 			return nil, _errFromID
 		}
-		v.FromID = _objFromID.(PeerClass)
+		_cFromID, _okFromID := _objFromID.(PeerClass)
+		if !_okFromID {
+			return nil, fmt.Errorf("decode: field from_id: unexpected type %T", _objFromID)
+		}
+		v.FromID = _cFromID
 	}
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
@@ -7971,13 +8529,21 @@ func DecodeSavedStarGift(r *Reader) (*SavedStarGift, error) {
 	if _errGift != nil {
 		return nil, _errGift
 	}
-	v.Gift = _objGift.(StarGiftClass)
+	_cGift, _okGift := _objGift.(StarGiftClass)
+	if !_okGift {
+		return nil, fmt.Errorf("decode: field gift: unexpected type %T", _objGift)
+	}
+	v.Gift = _cGift
 	if v.Flags.Has(2) {
 		_objMessage, _errMessage := ReadTLObject(r)
 		if _errMessage != nil {
 			return nil, _errMessage
 		}
-		v.Message = _objMessage.(*TextWithEntities)
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	if v.Flags.Has(3) {
 		_rMsgID, _eMsgID := r.ReadInt32()
@@ -8161,11 +8727,11 @@ func (v *PaymentsSavedStarGifts) GetChatNotificationsEnabled() (value bool, ok b
 // DecodePaymentsSavedStarGifts deserializes a PaymentsSavedStarGifts from a reader using the TL binary protocol.
 func DecodePaymentsSavedStarGifts(r *Reader) (*PaymentsSavedStarGifts, error) {
 	v := &PaymentsSavedStarGifts{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -8182,6 +8748,9 @@ func DecodePaymentsSavedStarGifts(r *Reader) (*PaymentsSavedStarGifts, error) {
 	if _ehdrGifts != nil {
 		return nil, _ehdrGifts
 	}
+	if _errGifts := checkVectorConstructor(_vhdrGifts); _errGifts != nil {
+		return nil, _errGifts
+	}
 	_cntGifts, _ecntGifts := r.ReadUint32()
 	if _ecntGifts != nil {
 		return nil, _ecntGifts
@@ -8195,9 +8764,12 @@ func DecodePaymentsSavedStarGifts(r *Reader) (*PaymentsSavedStarGifts, error) {
 		if _errGifts != nil {
 			return nil, _errGifts
 		}
-		v.Gifts[_iGifts] = _objGifts.(*SavedStarGift)
+		_cGifts, _okGifts := _objGifts.(*SavedStarGift)
+		if !_okGifts {
+			return nil, fmt.Errorf("decode: field gifts: unexpected type %T", _objGifts)
+		}
+		v.Gifts[_iGifts] = _cGifts
 	}
-	_ = _vhdrGifts
 	if v.Flags.Has(0) {
 		_rNextOffset, _eNextOffset := r.ReadString()
 		if _eNextOffset != nil {
@@ -8208,6 +8780,9 @@ func DecodePaymentsSavedStarGifts(r *Reader) (*PaymentsSavedStarGifts, error) {
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -8222,12 +8797,18 @@ func DecodePaymentsSavedStarGifts(r *Reader) (*PaymentsSavedStarGifts, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -8242,9 +8823,12 @@ func DecodePaymentsSavedStarGifts(r *Reader) (*PaymentsSavedStarGifts, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -8344,7 +8928,11 @@ func DecodeInputSavedStarGiftChat(r *Reader) (*InputSavedStarGiftChat, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(InputPeerClass)
+	_cPeer, _okPeer := _objPeer.(InputPeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rSavedID, _eSavedID := r.ReadInt64()
 	if _eSavedID != nil {
 		return nil, _eSavedID
@@ -8599,7 +9187,11 @@ func DecodeStarGiftAttributeCounter(r *Reader) (*StarGiftAttributeCounter, error
 	if _errAttribute != nil {
 		return nil, _errAttribute
 	}
-	v.Attribute = _objAttribute.(StarGiftAttributeIDClass)
+	_cAttribute, _okAttribute := _objAttribute.(StarGiftAttributeIDClass)
+	if !_okAttribute {
+		return nil, fmt.Errorf("decode: field attribute: unexpected type %T", _objAttribute)
+	}
+	v.Attribute = _cAttribute
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -8700,11 +9292,11 @@ func (v *PaymentsResaleStarGifts) Encode(b *bytes.Buffer) error {
 // DecodePaymentsResaleStarGifts deserializes a PaymentsResaleStarGifts from a reader using the TL binary protocol.
 func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) {
 	v := &PaymentsResaleStarGifts{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -8713,6 +9305,9 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 	_vhdrGifts, _ehdrGifts := r.ReadUint32()
 	if _ehdrGifts != nil {
 		return nil, _ehdrGifts
+	}
+	if _errGifts := checkVectorConstructor(_vhdrGifts); _errGifts != nil {
+		return nil, _errGifts
 	}
 	_cntGifts, _ecntGifts := r.ReadUint32()
 	if _ecntGifts != nil {
@@ -8727,9 +9322,12 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 		if _errGifts != nil {
 			return nil, _errGifts
 		}
-		v.Gifts[_iGifts] = _objGifts.(StarGiftClass)
+		_cGifts, _okGifts := _objGifts.(StarGiftClass)
+		if !_okGifts {
+			return nil, fmt.Errorf("decode: field gifts: unexpected type %T", _objGifts)
+		}
+		v.Gifts[_iGifts] = _cGifts
 	}
-	_ = _vhdrGifts
 	if v.Flags.Has(0) {
 		_rNextOffset, _eNextOffset := r.ReadString()
 		if _eNextOffset != nil {
@@ -8741,6 +9339,9 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 		_vhdrAttributes, _ehdrAttributes := r.ReadUint32()
 		if _ehdrAttributes != nil {
 			return nil, _ehdrAttributes
+		}
+		if _errAttributes := checkVectorConstructor(_vhdrAttributes); _errAttributes != nil {
+			return nil, _errAttributes
 		}
 		_cntAttributes, _ecntAttributes := r.ReadUint32()
 		if _ecntAttributes != nil {
@@ -8755,9 +9356,12 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 			if _errAttributes != nil {
 				return nil, _errAttributes
 			}
-			v.Attributes[_iAttributes] = _objAttributes.(StarGiftAttributeClass)
+			_cAttributes, _okAttributes := _objAttributes.(StarGiftAttributeClass)
+			if !_okAttributes {
+				return nil, fmt.Errorf("decode: field attributes: unexpected type %T", _objAttributes)
+			}
+			v.Attributes[_iAttributes] = _cAttributes
 		}
-		_ = _vhdrAttributes
 	}
 	if v.Flags.Has(1) {
 		_rAttributesHash, _eAttributesHash := r.ReadInt64()
@@ -8769,6 +9373,9 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -8783,13 +9390,19 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	if v.Flags.Has(2) {
 		_vhdrCounters, _ehdrCounters := r.ReadUint32()
 		if _ehdrCounters != nil {
 			return nil, _ehdrCounters
+		}
+		if _errCounters := checkVectorConstructor(_vhdrCounters); _errCounters != nil {
+			return nil, _errCounters
 		}
 		_cntCounters, _ecntCounters := r.ReadUint32()
 		if _ecntCounters != nil {
@@ -8804,13 +9417,19 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 			if _errCounters != nil {
 				return nil, _errCounters
 			}
-			v.Counters[_iCounters] = _objCounters.(*StarGiftAttributeCounter)
+			_cCounters, _okCounters := _objCounters.(*StarGiftAttributeCounter)
+			if !_okCounters {
+				return nil, fmt.Errorf("decode: field counters: unexpected type %T", _objCounters)
+			}
+			v.Counters[_iCounters] = _cCounters
 		}
-		_ = _vhdrCounters
 	}
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -8825,9 +9444,12 @@ func DecodePaymentsResaleStarGifts(r *Reader) (*PaymentsResaleStarGifts, error) 
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -8880,11 +9502,11 @@ func (v *StarsRating) Encode(b *bytes.Buffer) error {
 // DecodeStarsRating deserializes a StarsRating from a reader using the TL binary protocol.
 func DecodeStarsRating(r *Reader) (*StarsRating, error) {
 	v := &StarsRating{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rLevel, _eLevel := r.ReadInt32()
 	if _eLevel != nil {
 		return nil, _eLevel
@@ -8961,11 +9583,11 @@ func (v *StarGiftCollection) Encode(b *bytes.Buffer) error {
 // DecodeStarGiftCollection deserializes a StarGiftCollection from a reader using the TL binary protocol.
 func DecodeStarGiftCollection(r *Reader) (*StarGiftCollection, error) {
 	v := &StarGiftCollection{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCollectionID, _eCollectionID := r.ReadInt32()
 	if _eCollectionID != nil {
 		return nil, _eCollectionID
@@ -8981,7 +9603,11 @@ func DecodeStarGiftCollection(r *Reader) (*StarGiftCollection, error) {
 		if _errIcon != nil {
 			return nil, _errIcon
 		}
-		v.Icon = _objIcon.(DocumentClass)
+		_cIcon, _okIcon := _objIcon.(DocumentClass)
+		if !_okIcon {
+			return nil, fmt.Errorf("decode: field icon: unexpected type %T", _objIcon)
+		}
+		v.Icon = _cIcon
 	}
 	_rGiftsCount, _eGiftsCount := r.ReadInt32()
 	if _eGiftsCount != nil {
@@ -9081,6 +9707,9 @@ func DecodePaymentsStarGiftCollections(r *Reader) (*PaymentsStarGiftCollections,
 	if _ehdrCollections != nil {
 		return nil, _ehdrCollections
 	}
+	if _errCollections := checkVectorConstructor(_vhdrCollections); _errCollections != nil {
+		return nil, _errCollections
+	}
 	_cntCollections, _ecntCollections := r.ReadUint32()
 	if _ecntCollections != nil {
 		return nil, _ecntCollections
@@ -9094,9 +9723,12 @@ func DecodePaymentsStarGiftCollections(r *Reader) (*PaymentsStarGiftCollections,
 		if _errCollections != nil {
 			return nil, _errCollections
 		}
-		v.Collections[_iCollections] = _objCollections.(*StarGiftCollection)
+		_cCollections, _okCollections := _objCollections.(*StarGiftCollection)
+		if !_okCollections {
+			return nil, fmt.Errorf("decode: field collections: unexpected type %T", _objCollections)
+		}
+		v.Collections[_iCollections] = _cCollections
 	}
-	_ = _vhdrCollections
 	return v, nil
 }
 
@@ -9203,11 +9835,11 @@ func (v *PaymentsUniqueStarGiftValueInfo) Encode(b *bytes.Buffer) error {
 // DecodePaymentsUniqueStarGiftValueInfo deserializes a PaymentsUniqueStarGiftValueInfo from a reader using the TL binary protocol.
 func DecodePaymentsUniqueStarGiftValueInfo(r *Reader) (*PaymentsUniqueStarGiftValueInfo, error) {
 	v := &PaymentsUniqueStarGiftValueInfo{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.LastSaleOnFragment = v.Flags.Has(1)
 	v.ValueIsAverage = v.Flags.Has(6)
 	_rCurrency, _eCurrency := r.ReadString()
@@ -9368,7 +10000,11 @@ func DecodePaymentsCheckCanSendGiftResultFail(r *Reader) (*PaymentsCheckCanSendG
 	if _errReason != nil {
 		return nil, _errReason
 	}
-	v.Reason = _objReason.(*TextWithEntities)
+	_cReason, _okReason := _objReason.(*TextWithEntities)
+	if !_okReason {
+		return nil, fmt.Errorf("decode: field reason: unexpected type %T", _objReason)
+	}
+	v.Reason = _cReason
 	return v, nil
 }
 
@@ -9561,6 +10197,9 @@ func DecodeStarGiftAuctionState(r *Reader) (*StarGiftAuctionState, error) {
 	if _ehdrBidLevels != nil {
 		return nil, _ehdrBidLevels
 	}
+	if _errBidLevels := checkVectorConstructor(_vhdrBidLevels); _errBidLevels != nil {
+		return nil, _errBidLevels
+	}
 	_cntBidLevels, _ecntBidLevels := r.ReadUint32()
 	if _ecntBidLevels != nil {
 		return nil, _ecntBidLevels
@@ -9574,9 +10213,12 @@ func DecodeStarGiftAuctionState(r *Reader) (*StarGiftAuctionState, error) {
 		if _errBidLevels != nil {
 			return nil, _errBidLevels
 		}
-		v.BidLevels[_iBidLevels] = _objBidLevels.(*AuctionBidLevel)
+		_cBidLevels, _okBidLevels := _objBidLevels.(*AuctionBidLevel)
+		if !_okBidLevels {
+			return nil, fmt.Errorf("decode: field bid_levels: unexpected type %T", _objBidLevels)
+		}
+		v.BidLevels[_iBidLevels] = _cBidLevels
 	}
-	_ = _vhdrBidLevels
 	_vvTopBidders, _veTopBidders := r.ReadVectorLong()
 	if _veTopBidders != nil {
 		return nil, _veTopBidders
@@ -9611,6 +10253,9 @@ func DecodeStarGiftAuctionState(r *Reader) (*StarGiftAuctionState, error) {
 	if _ehdrRounds != nil {
 		return nil, _ehdrRounds
 	}
+	if _errRounds := checkVectorConstructor(_vhdrRounds); _errRounds != nil {
+		return nil, _errRounds
+	}
 	_cntRounds, _ecntRounds := r.ReadUint32()
 	if _ecntRounds != nil {
 		return nil, _ecntRounds
@@ -9624,9 +10269,12 @@ func DecodeStarGiftAuctionState(r *Reader) (*StarGiftAuctionState, error) {
 		if _errRounds != nil {
 			return nil, _errRounds
 		}
-		v.Rounds[_iRounds] = _objRounds.(StarGiftAuctionRoundClass)
+		_cRounds, _okRounds := _objRounds.(StarGiftAuctionRoundClass)
+		if !_okRounds {
+			return nil, fmt.Errorf("decode: field rounds: unexpected type %T", _objRounds)
+		}
+		v.Rounds[_iRounds] = _cRounds
 	}
-	_ = _vhdrRounds
 	return v, nil
 }
 
@@ -9690,11 +10338,11 @@ func (v *StarGiftAuctionStateFinished) Encode(b *bytes.Buffer) error {
 // DecodeStarGiftAuctionStateFinished deserializes a StarGiftAuctionStateFinished from a reader using the TL binary protocol.
 func DecodeStarGiftAuctionStateFinished(r *Reader) (*StarGiftAuctionStateFinished, error) {
 	v := &StarGiftAuctionStateFinished{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rStartDate, _eStartDate := r.ReadInt32()
 	if _eStartDate != nil {
 		return nil, _eStartDate
@@ -9784,17 +10432,29 @@ func DecodePaymentsStarGiftAuctionState(r *Reader) (*PaymentsStarGiftAuctionStat
 	if _errGift != nil {
 		return nil, _errGift
 	}
-	v.Gift = _objGift.(StarGiftClass)
+	_cGift, _okGift := _objGift.(StarGiftClass)
+	if !_okGift {
+		return nil, fmt.Errorf("decode: field gift: unexpected type %T", _objGift)
+	}
+	v.Gift = _cGift
 	_objState, _errState := ReadTLObject(r)
 	if _errState != nil {
 		return nil, _errState
 	}
-	v.State = _objState.(StarGiftAuctionStateClass)
+	_cState, _okState := _objState.(StarGiftAuctionStateClass)
+	if !_okState {
+		return nil, fmt.Errorf("decode: field state: unexpected type %T", _objState)
+	}
+	v.State = _cState
 	_objUserState, _errUserState := ReadTLObject(r)
 	if _errUserState != nil {
 		return nil, _errUserState
 	}
-	v.UserState = _objUserState.(*StarGiftAuctionUserState)
+	_cUserState, _okUserState := _objUserState.(*StarGiftAuctionUserState)
+	if !_okUserState {
+		return nil, fmt.Errorf("decode: field user_state: unexpected type %T", _objUserState)
+	}
+	v.UserState = _cUserState
 	_rTimeout, _eTimeout := r.ReadInt32()
 	if _eTimeout != nil {
 		return nil, _eTimeout
@@ -9803,6 +10463,9 @@ func DecodePaymentsStarGiftAuctionState(r *Reader) (*PaymentsStarGiftAuctionStat
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -9817,12 +10480,18 @@ func DecodePaymentsStarGiftAuctionState(r *Reader) (*PaymentsStarGiftAuctionStat
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -9837,9 +10506,12 @@ func DecodePaymentsStarGiftAuctionState(r *Reader) (*PaymentsStarGiftAuctionStat
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	return v, nil
 }
 
@@ -9907,17 +10579,21 @@ func (v *StarGiftAuctionAcquiredGift) Encode(b *bytes.Buffer) error {
 // DecodeStarGiftAuctionAcquiredGift deserializes a StarGiftAuctionAcquiredGift from a reader using the TL binary protocol.
 func DecodeStarGiftAuctionAcquiredGift(r *Reader) (*StarGiftAuctionAcquiredGift, error) {
 	v := &StarGiftAuctionAcquiredGift{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.NameHidden = v.Flags.Has(0)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_rDate, _eDate := r.ReadInt32()
 	if _eDate != nil {
 		return nil, _eDate
@@ -9943,7 +10619,11 @@ func DecodeStarGiftAuctionAcquiredGift(r *Reader) (*StarGiftAuctionAcquiredGift,
 		if _errMessage != nil {
 			return nil, _errMessage
 		}
-		v.Message = _objMessage.(*TextWithEntities)
+		_cMessage, _okMessage := _objMessage.(*TextWithEntities)
+		if !_okMessage {
+			return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+		}
+		v.Message = _cMessage
 	}
 	if v.Flags.Has(2) {
 		_rGiftNum, _eGiftNum := r.ReadInt32()
@@ -10006,6 +10686,9 @@ func DecodePaymentsStarGiftAuctionAcquiredGifts(r *Reader) (*PaymentsStarGiftAuc
 	if _ehdrGifts != nil {
 		return nil, _ehdrGifts
 	}
+	if _errGifts := checkVectorConstructor(_vhdrGifts); _errGifts != nil {
+		return nil, _errGifts
+	}
 	_cntGifts, _ecntGifts := r.ReadUint32()
 	if _ecntGifts != nil {
 		return nil, _ecntGifts
@@ -10019,12 +10702,18 @@ func DecodePaymentsStarGiftAuctionAcquiredGifts(r *Reader) (*PaymentsStarGiftAuc
 		if _errGifts != nil {
 			return nil, _errGifts
 		}
-		v.Gifts[_iGifts] = _objGifts.(*StarGiftAuctionAcquiredGift)
+		_cGifts, _okGifts := _objGifts.(*StarGiftAuctionAcquiredGift)
+		if !_okGifts {
+			return nil, fmt.Errorf("decode: field gifts: unexpected type %T", _objGifts)
+		}
+		v.Gifts[_iGifts] = _cGifts
 	}
-	_ = _vhdrGifts
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -10039,12 +10728,18 @@ func DecodePaymentsStarGiftAuctionAcquiredGifts(r *Reader) (*PaymentsStarGiftAuc
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -10059,9 +10754,12 @@ func DecodePaymentsStarGiftAuctionAcquiredGifts(r *Reader) (*PaymentsStarGiftAuc
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	return v, nil
 }
 
@@ -10104,17 +10802,29 @@ func DecodeStarGiftActiveAuctionState(r *Reader) (*StarGiftActiveAuctionState, e
 	if _errGift != nil {
 		return nil, _errGift
 	}
-	v.Gift = _objGift.(StarGiftClass)
+	_cGift, _okGift := _objGift.(StarGiftClass)
+	if !_okGift {
+		return nil, fmt.Errorf("decode: field gift: unexpected type %T", _objGift)
+	}
+	v.Gift = _cGift
 	_objState, _errState := ReadTLObject(r)
 	if _errState != nil {
 		return nil, _errState
 	}
-	v.State = _objState.(StarGiftAuctionStateClass)
+	_cState, _okState := _objState.(StarGiftAuctionStateClass)
+	if !_okState {
+		return nil, fmt.Errorf("decode: field state: unexpected type %T", _objState)
+	}
+	v.State = _cState
 	_objUserState, _errUserState := ReadTLObject(r)
 	if _errUserState != nil {
 		return nil, _errUserState
 	}
-	v.UserState = _objUserState.(*StarGiftAuctionUserState)
+	_cUserState, _okUserState := _objUserState.(*StarGiftAuctionUserState)
+	if !_okUserState {
+		return nil, fmt.Errorf("decode: field user_state: unexpected type %T", _objUserState)
+	}
+	v.UserState = _cUserState
 	return v, nil
 }
 
@@ -10215,6 +10925,9 @@ func DecodePaymentsStarGiftActiveAuctions(r *Reader) (*PaymentsStarGiftActiveAuc
 	if _ehdrAuctions != nil {
 		return nil, _ehdrAuctions
 	}
+	if _errAuctions := checkVectorConstructor(_vhdrAuctions); _errAuctions != nil {
+		return nil, _errAuctions
+	}
 	_cntAuctions, _ecntAuctions := r.ReadUint32()
 	if _ecntAuctions != nil {
 		return nil, _ecntAuctions
@@ -10228,12 +10941,18 @@ func DecodePaymentsStarGiftActiveAuctions(r *Reader) (*PaymentsStarGiftActiveAuc
 		if _errAuctions != nil {
 			return nil, _errAuctions
 		}
-		v.Auctions[_iAuctions] = _objAuctions.(*StarGiftActiveAuctionState)
+		_cAuctions, _okAuctions := _objAuctions.(*StarGiftActiveAuctionState)
+		if !_okAuctions {
+			return nil, fmt.Errorf("decode: field auctions: unexpected type %T", _objAuctions)
+		}
+		v.Auctions[_iAuctions] = _cAuctions
 	}
-	_ = _vhdrAuctions
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -10248,12 +10967,18 @@ func DecodePaymentsStarGiftActiveAuctions(r *Reader) (*PaymentsStarGiftActiveAuc
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -10268,9 +10993,12 @@ func DecodePaymentsStarGiftActiveAuctions(r *Reader) (*PaymentsStarGiftActiveAuc
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	return v, nil
 }
 
@@ -10578,6 +11306,9 @@ func DecodePaymentsStarGiftUpgradeAttributes(r *Reader) (*PaymentsStarGiftUpgrad
 	if _ehdrAttributes != nil {
 		return nil, _ehdrAttributes
 	}
+	if _errAttributes := checkVectorConstructor(_vhdrAttributes); _errAttributes != nil {
+		return nil, _errAttributes
+	}
 	_cntAttributes, _ecntAttributes := r.ReadUint32()
 	if _ecntAttributes != nil {
 		return nil, _ecntAttributes
@@ -10591,9 +11322,12 @@ func DecodePaymentsStarGiftUpgradeAttributes(r *Reader) (*PaymentsStarGiftUpgrad
 		if _errAttributes != nil {
 			return nil, _errAttributes
 		}
-		v.Attributes[_iAttributes] = _objAttributes.(StarGiftAttributeClass)
+		_cAttributes, _okAttributes := _objAttributes.(StarGiftAttributeClass)
+		if !_okAttributes {
+			return nil, fmt.Errorf("decode: field attributes: unexpected type %T", _objAttributes)
+		}
+		v.Attributes[_iAttributes] = _cAttributes
 	}
-	_ = _vhdrAttributes
 	return v, nil
 }
 

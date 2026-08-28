@@ -4,6 +4,7 @@ package tg
 
 import (
 	"bytes"
+	"fmt"
 )
 
 // InputAiComposeToneClass is the interface for TL type InputAiComposeTone.
@@ -23,6 +24,9 @@ const InputAiComposeToneIDTypeID = 0x0773c080
 // InputAiComposeToneSlugTypeID is the constructor ID for TL type inputAiComposeToneSlug.
 const InputAiComposeToneSlugTypeID = 0x1fa01357
 
+// InputAiComposeToneSingleUseTypeID is the constructor ID for TL type inputAiComposeToneSingleUse.
+const InputAiComposeToneSingleUseTypeID = 0x0e0c35af
+
 // isInputAiComposeTone marks InputAiComposeToneDefault as implementing the InputAiComposeToneClass interface.
 func (*InputAiComposeToneDefault) isInputAiComposeTone() {}
 
@@ -31,6 +35,9 @@ func (*InputAiComposeToneID) isInputAiComposeTone() {}
 
 // isInputAiComposeTone marks InputAiComposeToneSlug as implementing the InputAiComposeToneClass interface.
 func (*InputAiComposeToneSlug) isInputAiComposeTone() {}
+
+// isInputAiComposeTone marks InputAiComposeToneSingleUse as implementing the InputAiComposeToneClass interface.
+func (*InputAiComposeToneSingleUse) isInputAiComposeTone() {}
 
 // InputAiComposeToneDefault represents the TL constructor inputAiComposeToneDefault (0x1fe9a9bf).
 //
@@ -147,6 +154,42 @@ func init() {
 	}
 }
 
+// InputAiComposeToneSingleUse represents the TL constructor inputAiComposeToneSingleUse (0x0e0c35af).
+//
+// See https://core.telegram.org/constructor/inputAiComposeToneSingleUse for reference.
+type InputAiComposeToneSingleUse struct {
+	CustomPrompt string `json:"custom_prompt,omitempty"`
+}
+
+// ConstructorID returns the TL constructor identifier 0x0e0c35af.
+func (v *InputAiComposeToneSingleUse) ConstructorID() uint32 {
+	return InputAiComposeToneSingleUseTypeID
+}
+
+// Encode serializes InputAiComposeToneSingleUse to a bytes.Buffer using the TL binary protocol.
+func (v *InputAiComposeToneSingleUse) Encode(b *bytes.Buffer) error {
+	WriteInt(b, InputAiComposeToneSingleUseTypeID)
+	WriteString(b, v.CustomPrompt)
+	return nil
+}
+
+// DecodeInputAiComposeToneSingleUse deserializes a InputAiComposeToneSingleUse from a reader using the TL binary protocol.
+func DecodeInputAiComposeToneSingleUse(r *Reader) (*InputAiComposeToneSingleUse, error) {
+	v := &InputAiComposeToneSingleUse{}
+	_rCustomPrompt, _eCustomPrompt := r.ReadString()
+	if _eCustomPrompt != nil {
+		return nil, _eCustomPrompt
+	}
+	v.CustomPrompt = _rCustomPrompt
+	return v, nil
+}
+
+func init() {
+	Registry[InputAiComposeToneSingleUseTypeID] = func(r *Reader) (TLObject, error) {
+		return DecodeInputAiComposeToneSingleUse(r)
+	}
+}
+
 // AiComposeToneClass is the interface for TL type AiComposeTone.
 // Implementations must satisfy TLObject and are used to represent
 // any constructor of the AiComposeTone TL type.
@@ -241,11 +284,11 @@ func (v *AiComposeTone) Encode(b *bytes.Buffer) error {
 // DecodeAiComposeTone deserializes a AiComposeTone from a reader using the TL binary protocol.
 func DecodeAiComposeTone(r *Reader) (*AiComposeTone, error) {
 	v := &AiComposeTone{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Creator = v.Flags.Has(0)
 	_rID, _eID := r.ReadInt64()
 	if _eID != nil {
@@ -300,7 +343,11 @@ func DecodeAiComposeTone(r *Reader) (*AiComposeTone, error) {
 		if _errExampleEnglish != nil {
 			return nil, _errExampleEnglish
 		}
-		v.ExampleEnglish = _objExampleEnglish.(*AiComposeToneExample)
+		_cExampleEnglish, _okExampleEnglish := _objExampleEnglish.(*AiComposeToneExample)
+		if !_okExampleEnglish {
+			return nil, fmt.Errorf("decode: field example_english: unexpected type %T", _objExampleEnglish)
+		}
+		v.ExampleEnglish = _cExampleEnglish
 	}
 	return v, nil
 }
@@ -453,6 +500,9 @@ func DecodeAicomposeTones(r *Reader) (*AicomposeTones, error) {
 	if _ehdrTones != nil {
 		return nil, _ehdrTones
 	}
+	if _errTones := checkVectorConstructor(_vhdrTones); _errTones != nil {
+		return nil, _errTones
+	}
 	_cntTones, _ecntTones := r.ReadUint32()
 	if _ecntTones != nil {
 		return nil, _ecntTones
@@ -466,12 +516,18 @@ func DecodeAicomposeTones(r *Reader) (*AicomposeTones, error) {
 		if _errTones != nil {
 			return nil, _errTones
 		}
-		v.Tones[_iTones] = _objTones.(AiComposeToneClass)
+		_cTones, _okTones := _objTones.(AiComposeToneClass)
+		if !_okTones {
+			return nil, fmt.Errorf("decode: field tones: unexpected type %T", _objTones)
+		}
+		v.Tones[_iTones] = _cTones
 	}
-	_ = _vhdrTones
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -486,9 +542,12 @@ func DecodeAicomposeTones(r *Reader) (*AicomposeTones, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -529,12 +588,20 @@ func DecodeAiComposeToneExample(r *Reader) (*AiComposeToneExample, error) {
 	if _errFrom != nil {
 		return nil, _errFrom
 	}
-	v.From = _objFrom.(*TextWithEntities)
+	_cFrom, _okFrom := _objFrom.(*TextWithEntities)
+	if !_okFrom {
+		return nil, fmt.Errorf("decode: field from: unexpected type %T", _objFrom)
+	}
+	v.From = _cFrom
 	_objTo, _errTo := ReadTLObject(r)
 	if _errTo != nil {
 		return nil, _errTo
 	}
-	v.To = _objTo.(*TextWithEntities)
+	_cTo, _okTo := _objTo.(*TextWithEntities)
+	if !_okTo {
+		return nil, fmt.Errorf("decode: field to: unexpected type %T", _objTo)
+	}
+	v.To = _cTo
 	return v, nil
 }
 

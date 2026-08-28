@@ -1,7 +1,9 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 	"testing"
@@ -9,6 +11,13 @@ import (
 
 	"github.com/mtgo-labs/mtgo/tg"
 )
+
+type failingSendTransport struct {
+	*mockTransport
+	err error
+}
+
+func (m *failingSendTransport) Send([]byte) error { return m.err }
 
 // newBatcherTestSession creates a session with mock transport and test workers
 // suitable for batcher testing. Returns the session, transport, and cleanup.
@@ -29,7 +38,82 @@ func TestBatcher_DisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestBatcher_LoneRPCImmediateFlush(t *testing.T) {
+func TestSessionSendHighPriorityBypassesBatcher(t *testing.T) {
+	s, mt, cleanup := newBatcherTestSession(t)
+	defer cleanup()
+
+	s.EnableOutboundBatching(1<<20, 5*time.Second)
+	defer s.CloseOutboundBatching()
+
+	msgID := s.msgFactory.AllocateMsgID()
+	seqNo := s.msgFactory.AllocateSeqNo(true)
+	pingID := time.Now().UnixNano()
+	sendDone := make(chan error, 1)
+	go func() {
+		_, err := s.Send(context.Background(), msgID, uint32(seqNo), &tg.PingRequest{PingID: pingID}, 5*time.Second)
+		sendDone <- err
+	}()
+
+	select {
+	case <-mt.sendCh:
+	case <-time.After(time.Second):
+		t.Fatal("high-priority RPC waited for the batching window")
+	}
+
+	snap := s.BatcherSnapshot()
+	if snap.HighDepth != 0 || snap.MessagesPacked != 0 {
+		t.Fatalf("high-priority RPC entered batcher: %+v", snap)
+	}
+
+	mt.recvCh <- makeEncryptedResponse(s, makeServerMsgID(), uint32(s.msgFactory.AllocateSeqNo(false)), &tg.Pong{
+		MsgID:  msgID,
+		PingID: pingID,
+	})
+	if err := <-sendDone; err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+}
+
+func TestSessionSendLowPriorityUsesBatcher(t *testing.T) {
+	s, mt, cleanup := newBatcherTestSession(t)
+	defer cleanup()
+
+	s.EnableOutboundBatching(1<<20, 5*time.Second)
+	defer s.CloseOutboundBatching()
+
+	msgID := s.msgFactory.AllocateMsgID()
+	seqNo := s.msgFactory.AllocateSeqNo(true)
+	sendDone := make(chan error, 1)
+	go func() {
+		_, err := s.Send(context.Background(), msgID, uint32(seqNo), &tg.UploadSaveFilePartRequest{
+			FileID:   1,
+			FilePart: 0,
+			Bytes:    []byte{1},
+		}, 10*time.Second)
+		sendDone <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for s.BatcherSnapshot().LowDepth != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if snap := s.BatcherSnapshot(); snap.LowDepth != 1 {
+		t.Fatalf("low-priority RPC did not enter batcher: %+v", snap)
+	}
+	select {
+	case <-mt.sendCh:
+		t.Fatal("low-priority RPC bypassed the batching window")
+	default:
+	}
+
+	wantErr := errors.New("test complete")
+	s.pending.Reject(msgID, wantErr)
+	if err := <-sendDone; !errors.Is(err, wantErr) {
+		t.Fatalf("Send error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestBatcher_LoneRPCFlushesAfterWindow(t *testing.T) {
 	s, mt, cleanup := newBatcherTestSession(t)
 	defer cleanup()
 
@@ -120,6 +204,86 @@ func TestBatcher_BurstCoalesced(t *testing.T) {
 done:
 	if sentCount == 0 {
 		t.Fatal("no data sent to transport")
+	}
+}
+
+func TestBatcher_ResendsChildAsEncryptedMessage(t *testing.T) {
+	s, mt, cleanup := newBatcherTestSession(t)
+	defer cleanup()
+
+	s.EnableOutboundBatching(1<<20, time.Millisecond)
+	defer s.CloseOutboundBatching()
+
+	msgID1 := s.msgFactory.AllocateMsgID()
+	seqNo1 := uint32(s.msgFactory.AllocateSeqNo(true))
+	msgID2 := s.msgFactory.AllocateMsgID()
+	seqNo2 := uint32(s.msgFactory.AllocateSeqNo(true))
+	if _, err := s.outboundBatcher.Submit(context.Background(), msgID1, seqNo1, &tg.PingRequest{PingID: 11}, PriorityHigh, 5*time.Second); err != nil {
+		t.Fatalf("Submit first: %v", err)
+	}
+	if _, err := s.outboundBatcher.Submit(context.Background(), msgID2, seqNo2, &tg.PingRequest{PingID: 22}, PriorityHigh, 5*time.Second); err != nil {
+		t.Fatalf("Submit second: %v", err)
+	}
+
+	select {
+	case <-mt.sendCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial container")
+	}
+
+	var resendReq bytes.Buffer
+	tg.WriteVectorLong(&resendReq, []int64{msgID1})
+	s.handleRawMsgResendReq(5000, resendReq.Bytes())
+
+	select {
+	case payload := <-mt.sendCh:
+		msg, err := unpackTestOutgoing(s, payload)
+		if err != nil {
+			t.Fatalf("unpack resent message: %v", err)
+		}
+		if msg.MsgID != msgID1 || msg.SeqNo != seqNo1 {
+			t.Fatalf("resent envelope = (%d, %d), want (%d, %d)", msg.MsgID, msg.SeqNo, msgID1, seqNo1)
+		}
+		ping, ok := msg.Body.(*tg.PingRequest)
+		if !ok || ping.PingID != 11 {
+			t.Fatalf("resent body = %#v, want PingRequest(11)", msg.Body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resent child")
+	}
+
+	s.pending.Cancel(msgID1)
+	s.pending.Cancel(msgID2)
+}
+
+func TestBatcher_WriteFailureCompletesCaller(t *testing.T) {
+	s := newSessionWithAuthKey(t)
+	wantErr := errors.New("write failed")
+	mt := &failingSendTransport{mockTransport: newMockTransport(), err: wantErr}
+	s.SetTransport(mt)
+	cleanup := startTestWorkers(s, mt.mockTransport)
+	defer cleanup()
+
+	s.EnableOutboundBatching(1<<20, time.Millisecond)
+	defer s.CloseOutboundBatching()
+
+	started := time.Now()
+	msgID := s.msgFactory.AllocateMsgID()
+	seqNo := uint32(s.msgFactory.AllocateSeqNo(true))
+	_, err := s.Send(context.Background(), msgID, seqNo, &tg.UploadSaveFilePartRequest{
+		FileID:   1,
+		FilePart: 0,
+		Bytes:    []byte{1},
+	}, 2*time.Second)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Send error = %v, want wrapped %v", err, wantErr)
+	}
+	var deliveryErr *DeliveryError
+	if !errors.As(err, &deliveryErr) || deliveryErr.State != DeliveryUnknown {
+		t.Fatalf("Send error = %v, want unknown DeliveryError", err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("write failure took %v; caller was not completed promptly", elapsed)
 	}
 }
 

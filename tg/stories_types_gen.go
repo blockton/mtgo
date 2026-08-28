@@ -4,6 +4,7 @@ package tg
 
 import (
 	"bytes"
+	"fmt"
 )
 
 // DefaultHistoryTTLTypeID is the constructor ID for TL type defaultHistoryTTL.
@@ -130,11 +131,11 @@ func (v *StoryViews) Encode(b *bytes.Buffer) error {
 // DecodeStoryViews deserializes a StoryViews from a reader using the TL binary protocol.
 func DecodeStoryViews(r *Reader) (*StoryViews, error) {
 	v := &StoryViews{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.HasViewers = v.Flags.Has(1)
 	_rViewsCount, _eViewsCount := r.ReadInt32()
 	if _eViewsCount != nil {
@@ -153,6 +154,9 @@ func DecodeStoryViews(r *Reader) (*StoryViews, error) {
 		if _ehdrReactions != nil {
 			return nil, _ehdrReactions
 		}
+		if _errReactions := checkVectorConstructor(_vhdrReactions); _errReactions != nil {
+			return nil, _errReactions
+		}
 		_cntReactions, _ecntReactions := r.ReadUint32()
 		if _ecntReactions != nil {
 			return nil, _ecntReactions
@@ -166,9 +170,12 @@ func DecodeStoryViews(r *Reader) (*StoryViews, error) {
 			if _errReactions != nil {
 				return nil, _errReactions
 			}
-			v.Reactions[_iReactions] = _objReactions.(*ReactionCount)
+			_cReactions, _okReactions := _objReactions.(*ReactionCount)
+			if !_okReactions {
+				return nil, fmt.Errorf("decode: field reactions: unexpected type %T", _objReactions)
+			}
+			v.Reactions[_iReactions] = _cReactions
 		}
-		_ = _vhdrReactions
 	}
 	if v.Flags.Has(4) {
 		_rReactionsCount, _eReactionsCount := r.ReadInt32()
@@ -229,6 +236,9 @@ func DecodeStoriesStoryViews(r *Reader) (*StoriesStoryViews, error) {
 	if _ehdrViews != nil {
 		return nil, _ehdrViews
 	}
+	if _errViews := checkVectorConstructor(_vhdrViews); _errViews != nil {
+		return nil, _errViews
+	}
 	_cntViews, _ecntViews := r.ReadUint32()
 	if _ecntViews != nil {
 		return nil, _ecntViews
@@ -242,12 +252,18 @@ func DecodeStoriesStoryViews(r *Reader) (*StoriesStoryViews, error) {
 		if _errViews != nil {
 			return nil, _errViews
 		}
-		v.Views[_iViews] = _objViews.(StoryViewsClass)
+		_cViews, _okViews := _objViews.(StoryViewsClass)
+		if !_okViews {
+			return nil, fmt.Errorf("decode: field views: unexpected type %T", _objViews)
+		}
+		v.Views[_iViews] = _cViews
 	}
-	_ = _vhdrViews
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -262,9 +278,12 @@ func DecodeStoriesStoryViews(r *Reader) (*StoriesStoryViews, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -377,11 +396,11 @@ func (v *StoryItemSkipped) Encode(b *bytes.Buffer) error {
 // DecodeStoryItemSkipped deserializes a StoryItemSkipped from a reader using the TL binary protocol.
 func DecodeStoryItemSkipped(r *Reader) (*StoryItemSkipped, error) {
 	v := &StoryItemSkipped{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.CloseFriends = v.Flags.Has(8)
 	v.Live = v.Flags.Has(9)
 	_rID, _eID := r.ReadInt32()
@@ -561,11 +580,11 @@ func (v *StoryItem) Encode(b *bytes.Buffer) error {
 // DecodeStoryItem deserializes a StoryItem from a reader using the TL binary protocol.
 func DecodeStoryItem(r *Reader) (*StoryItem, error) {
 	v := &StoryItem{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Pinned = v.Flags.Has(5)
 	v.Public = v.Flags.Has(7)
 	v.CloseFriends = v.Flags.Has(8)
@@ -590,14 +609,22 @@ func DecodeStoryItem(r *Reader) (*StoryItem, error) {
 		if _errFromID != nil {
 			return nil, _errFromID
 		}
-		v.FromID = _objFromID.(PeerClass)
+		_cFromID, _okFromID := _objFromID.(PeerClass)
+		if !_okFromID {
+			return nil, fmt.Errorf("decode: field from_id: unexpected type %T", _objFromID)
+		}
+		v.FromID = _cFromID
 	}
 	if v.Flags.Has(17) {
 		_objFwdFrom, _errFwdFrom := ReadTLObject(r)
 		if _errFwdFrom != nil {
 			return nil, _errFwdFrom
 		}
-		v.FwdFrom = _objFwdFrom.(*StoryFwdHeader)
+		_cFwdFrom, _okFwdFrom := _objFwdFrom.(*StoryFwdHeader)
+		if !_okFwdFrom {
+			return nil, fmt.Errorf("decode: field fwd_from: unexpected type %T", _objFwdFrom)
+		}
+		v.FwdFrom = _cFwdFrom
 	}
 	_rExpireDate, _eExpireDate := r.ReadInt32()
 	if _eExpireDate != nil {
@@ -616,6 +643,9 @@ func DecodeStoryItem(r *Reader) (*StoryItem, error) {
 		if _ehdrEntities != nil {
 			return nil, _ehdrEntities
 		}
+		if _errEntities := checkVectorConstructor(_vhdrEntities); _errEntities != nil {
+			return nil, _errEntities
+		}
 		_cntEntities, _ecntEntities := r.ReadUint32()
 		if _ecntEntities != nil {
 			return nil, _ecntEntities
@@ -629,19 +659,29 @@ func DecodeStoryItem(r *Reader) (*StoryItem, error) {
 			if _errEntities != nil {
 				return nil, _errEntities
 			}
-			v.Entities[_iEntities] = _objEntities.(MessageEntityClass)
+			_cEntities, _okEntities := _objEntities.(MessageEntityClass)
+			if !_okEntities {
+				return nil, fmt.Errorf("decode: field entities: unexpected type %T", _objEntities)
+			}
+			v.Entities[_iEntities] = _cEntities
 		}
-		_ = _vhdrEntities
 	}
 	_objMedia, _errMedia := ReadTLObject(r)
 	if _errMedia != nil {
 		return nil, _errMedia
 	}
-	v.Media = _objMedia.(MessageMediaClass)
+	_cMedia, _okMedia := _objMedia.(MessageMediaClass)
+	if !_okMedia {
+		return nil, fmt.Errorf("decode: field media: unexpected type %T", _objMedia)
+	}
+	v.Media = _cMedia
 	if v.Flags.Has(14) {
 		_vhdrMediaAreas, _ehdrMediaAreas := r.ReadUint32()
 		if _ehdrMediaAreas != nil {
 			return nil, _ehdrMediaAreas
+		}
+		if _errMediaAreas := checkVectorConstructor(_vhdrMediaAreas); _errMediaAreas != nil {
+			return nil, _errMediaAreas
 		}
 		_cntMediaAreas, _ecntMediaAreas := r.ReadUint32()
 		if _ecntMediaAreas != nil {
@@ -656,14 +696,20 @@ func DecodeStoryItem(r *Reader) (*StoryItem, error) {
 			if _errMediaAreas != nil {
 				return nil, _errMediaAreas
 			}
-			v.MediaAreas[_iMediaAreas] = _objMediaAreas.(MediaAreaClass)
+			_cMediaAreas, _okMediaAreas := _objMediaAreas.(MediaAreaClass)
+			if !_okMediaAreas {
+				return nil, fmt.Errorf("decode: field media_areas: unexpected type %T", _objMediaAreas)
+			}
+			v.MediaAreas[_iMediaAreas] = _cMediaAreas
 		}
-		_ = _vhdrMediaAreas
 	}
 	if v.Flags.Has(2) {
 		_vhdrPrivacy, _ehdrPrivacy := r.ReadUint32()
 		if _ehdrPrivacy != nil {
 			return nil, _ehdrPrivacy
+		}
+		if _errPrivacy := checkVectorConstructor(_vhdrPrivacy); _errPrivacy != nil {
+			return nil, _errPrivacy
 		}
 		_cntPrivacy, _ecntPrivacy := r.ReadUint32()
 		if _ecntPrivacy != nil {
@@ -678,23 +724,34 @@ func DecodeStoryItem(r *Reader) (*StoryItem, error) {
 			if _errPrivacy != nil {
 				return nil, _errPrivacy
 			}
-			v.Privacy[_iPrivacy] = _objPrivacy.(PrivacyRuleClass)
+			_cPrivacy, _okPrivacy := _objPrivacy.(PrivacyRuleClass)
+			if !_okPrivacy {
+				return nil, fmt.Errorf("decode: field privacy: unexpected type %T", _objPrivacy)
+			}
+			v.Privacy[_iPrivacy] = _cPrivacy
 		}
-		_ = _vhdrPrivacy
 	}
 	if v.Flags.Has(3) {
 		_objViews, _errViews := ReadTLObject(r)
 		if _errViews != nil {
 			return nil, _errViews
 		}
-		v.Views = _objViews.(StoryViewsClass)
+		_cViews, _okViews := _objViews.(StoryViewsClass)
+		if !_okViews {
+			return nil, fmt.Errorf("decode: field views: unexpected type %T", _objViews)
+		}
+		v.Views = _cViews
 	}
 	if v.Flags.Has(15) {
 		_objSentReaction, _errSentReaction := ReadTLObject(r)
 		if _errSentReaction != nil {
 			return nil, _errSentReaction
 		}
-		v.SentReaction = _objSentReaction.(ReactionClass)
+		_cSentReaction, _okSentReaction := _objSentReaction.(ReactionClass)
+		if !_okSentReaction {
+			return nil, fmt.Errorf("decode: field sent_reaction: unexpected type %T", _objSentReaction)
+		}
+		v.SentReaction = _cSentReaction
 	}
 	if v.Flags.Has(19) {
 		_vvAlbums, _veAlbums := r.ReadVectorInt()
@@ -708,7 +765,11 @@ func DecodeStoryItem(r *Reader) (*StoryItem, error) {
 		if _errMusic != nil {
 			return nil, _errMusic
 		}
-		v.Music = _objMusic.(DocumentClass)
+		_cMusic, _okMusic := _objMusic.(DocumentClass)
+		if !_okMusic {
+			return nil, fmt.Errorf("decode: field music: unexpected type %T", _objMusic)
+		}
+		v.Music = _cMusic
 	}
 	return v, nil
 }
@@ -770,11 +831,11 @@ func (v *StoriesAllStoriesNotModified) Encode(b *bytes.Buffer) error {
 // DecodeStoriesAllStoriesNotModified deserializes a StoriesAllStoriesNotModified from a reader using the TL binary protocol.
 func DecodeStoriesAllStoriesNotModified(r *Reader) (*StoriesAllStoriesNotModified, error) {
 	v := &StoriesAllStoriesNotModified{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rState, _eState := r.ReadString()
 	if _eState != nil {
 		return nil, _eState
@@ -784,7 +845,11 @@ func DecodeStoriesAllStoriesNotModified(r *Reader) (*StoriesAllStoriesNotModifie
 	if _errStealthMode != nil {
 		return nil, _errStealthMode
 	}
-	v.StealthMode = _objStealthMode.(*StoriesStealthMode)
+	_cStealthMode, _okStealthMode := _objStealthMode.(*StoriesStealthMode)
+	if !_okStealthMode {
+		return nil, fmt.Errorf("decode: field stealth_mode: unexpected type %T", _objStealthMode)
+	}
+	v.StealthMode = _cStealthMode
 	return v, nil
 }
 
@@ -849,11 +914,11 @@ func (v *StoriesAllStories) Encode(b *bytes.Buffer) error {
 // DecodeStoriesAllStories deserializes a StoriesAllStories from a reader using the TL binary protocol.
 func DecodeStoriesAllStories(r *Reader) (*StoriesAllStories, error) {
 	v := &StoriesAllStories{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.HasMore = v.Flags.Has(0)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
@@ -869,6 +934,9 @@ func DecodeStoriesAllStories(r *Reader) (*StoriesAllStories, error) {
 	if _ehdrPeerStories != nil {
 		return nil, _ehdrPeerStories
 	}
+	if _errPeerStories := checkVectorConstructor(_vhdrPeerStories); _errPeerStories != nil {
+		return nil, _errPeerStories
+	}
 	_cntPeerStories, _ecntPeerStories := r.ReadUint32()
 	if _ecntPeerStories != nil {
 		return nil, _ecntPeerStories
@@ -882,12 +950,18 @@ func DecodeStoriesAllStories(r *Reader) (*StoriesAllStories, error) {
 		if _errPeerStories != nil {
 			return nil, _errPeerStories
 		}
-		v.PeerStories[_iPeerStories] = _objPeerStories.(PeerStoriesClass)
+		_cPeerStories, _okPeerStories := _objPeerStories.(PeerStoriesClass)
+		if !_okPeerStories {
+			return nil, fmt.Errorf("decode: field peer_stories: unexpected type %T", _objPeerStories)
+		}
+		v.PeerStories[_iPeerStories] = _cPeerStories
 	}
-	_ = _vhdrPeerStories
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -902,12 +976,18 @@ func DecodeStoriesAllStories(r *Reader) (*StoriesAllStories, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -922,14 +1002,21 @@ func DecodeStoriesAllStories(r *Reader) (*StoriesAllStories, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	_objStealthMode, _errStealthMode := ReadTLObject(r)
 	if _errStealthMode != nil {
 		return nil, _errStealthMode
 	}
-	v.StealthMode = _objStealthMode.(*StoriesStealthMode)
+	_cStealthMode, _okStealthMode := _objStealthMode.(*StoriesStealthMode)
+	if !_okStealthMode {
+		return nil, fmt.Errorf("decode: field stealth_mode: unexpected type %T", _objStealthMode)
+	}
+	v.StealthMode = _cStealthMode
 	return v, nil
 }
 
@@ -996,11 +1083,11 @@ func (v *StoriesStories) Encode(b *bytes.Buffer) error {
 // DecodeStoriesStories deserializes a StoriesStories from a reader using the TL binary protocol.
 func DecodeStoriesStories(r *Reader) (*StoriesStories, error) {
 	v := &StoriesStories{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -1009,6 +1096,9 @@ func DecodeStoriesStories(r *Reader) (*StoriesStories, error) {
 	_vhdrStories, _ehdrStories := r.ReadUint32()
 	if _ehdrStories != nil {
 		return nil, _ehdrStories
+	}
+	if _errStories := checkVectorConstructor(_vhdrStories); _errStories != nil {
+		return nil, _errStories
 	}
 	_cntStories, _ecntStories := r.ReadUint32()
 	if _ecntStories != nil {
@@ -1023,9 +1113,12 @@ func DecodeStoriesStories(r *Reader) (*StoriesStories, error) {
 		if _errStories != nil {
 			return nil, _errStories
 		}
-		v.Stories[_iStories] = _objStories.(StoryItemClass)
+		_cStories, _okStories := _objStories.(StoryItemClass)
+		if !_okStories {
+			return nil, fmt.Errorf("decode: field stories: unexpected type %T", _objStories)
+		}
+		v.Stories[_iStories] = _cStories
 	}
-	_ = _vhdrStories
 	if v.Flags.Has(0) {
 		_vvPinnedToTop, _vePinnedToTop := r.ReadVectorInt()
 		if _vePinnedToTop != nil {
@@ -1036,6 +1129,9 @@ func DecodeStoriesStories(r *Reader) (*StoriesStories, error) {
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -1050,12 +1146,18 @@ func DecodeStoriesStories(r *Reader) (*StoriesStories, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -1070,9 +1172,12 @@ func DecodeStoriesStories(r *Reader) (*StoriesStories, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -1154,11 +1259,11 @@ func (v *StoryView) Encode(b *bytes.Buffer) error {
 // DecodeStoryView deserializes a StoryView from a reader using the TL binary protocol.
 func DecodeStoryView(r *Reader) (*StoryView, error) {
 	v := &StoryView{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Blocked = v.Flags.Has(0)
 	v.BlockedMyStoriesFrom = v.Flags.Has(1)
 	_rUserID, _eUserID := r.ReadInt64()
@@ -1176,7 +1281,11 @@ func DecodeStoryView(r *Reader) (*StoryView, error) {
 		if _errReaction != nil {
 			return nil, _errReaction
 		}
-		v.Reaction = _objReaction.(ReactionClass)
+		_cReaction, _okReaction := _objReaction.(ReactionClass)
+		if !_okReaction {
+			return nil, fmt.Errorf("decode: field reaction: unexpected type %T", _objReaction)
+		}
+		v.Reaction = _cReaction
 	}
 	return v, nil
 }
@@ -1224,18 +1333,22 @@ func (v *StoryViewPublicForward) Encode(b *bytes.Buffer) error {
 // DecodeStoryViewPublicForward deserializes a StoryViewPublicForward from a reader using the TL binary protocol.
 func DecodeStoryViewPublicForward(r *Reader) (*StoryViewPublicForward, error) {
 	v := &StoryViewPublicForward{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Blocked = v.Flags.Has(0)
 	v.BlockedMyStoriesFrom = v.Flags.Has(1)
 	_objMessage, _errMessage := ReadTLObject(r)
 	if _errMessage != nil {
 		return nil, _errMessage
 	}
-	v.Message = _objMessage.(MessageClass)
+	_cMessage, _okMessage := _objMessage.(MessageClass)
+	if !_okMessage {
+		return nil, fmt.Errorf("decode: field message: unexpected type %T", _objMessage)
+	}
+	v.Message = _cMessage
 	return v, nil
 }
 
@@ -1284,23 +1397,31 @@ func (v *StoryViewPublicRepost) Encode(b *bytes.Buffer) error {
 // DecodeStoryViewPublicRepost deserializes a StoryViewPublicRepost from a reader using the TL binary protocol.
 func DecodeStoryViewPublicRepost(r *Reader) (*StoryViewPublicRepost, error) {
 	v := &StoryViewPublicRepost{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Blocked = v.Flags.Has(0)
 	v.BlockedMyStoriesFrom = v.Flags.Has(1)
 	_objPeerID, _errPeerID := ReadTLObject(r)
 	if _errPeerID != nil {
 		return nil, _errPeerID
 	}
-	v.PeerID = _objPeerID.(PeerClass)
+	_cPeerID, _okPeerID := _objPeerID.(PeerClass)
+	if !_okPeerID {
+		return nil, fmt.Errorf("decode: field peer_id: unexpected type %T", _objPeerID)
+	}
+	v.PeerID = _cPeerID
 	_objStory, _errStory := ReadTLObject(r)
 	if _errStory != nil {
 		return nil, _errStory
 	}
-	v.Story = _objStory.(StoryItemClass)
+	_cStory, _okStory := _objStory.(StoryItemClass)
+	if !_okStory {
+		return nil, fmt.Errorf("decode: field story: unexpected type %T", _objStory)
+	}
+	v.Story = _cStory
 	return v, nil
 }
 
@@ -1373,11 +1494,11 @@ func (v *StoriesStoryViewsList) Encode(b *bytes.Buffer) error {
 // DecodeStoriesStoryViewsList deserializes a StoriesStoryViewsList from a reader using the TL binary protocol.
 func DecodeStoriesStoryViewsList(r *Reader) (*StoriesStoryViewsList, error) {
 	v := &StoriesStoryViewsList{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -1402,6 +1523,9 @@ func DecodeStoriesStoryViewsList(r *Reader) (*StoriesStoryViewsList, error) {
 	if _ehdrViews != nil {
 		return nil, _ehdrViews
 	}
+	if _errViews := checkVectorConstructor(_vhdrViews); _errViews != nil {
+		return nil, _errViews
+	}
 	_cntViews, _ecntViews := r.ReadUint32()
 	if _ecntViews != nil {
 		return nil, _ecntViews
@@ -1415,12 +1539,18 @@ func DecodeStoriesStoryViewsList(r *Reader) (*StoriesStoryViewsList, error) {
 		if _errViews != nil {
 			return nil, _errViews
 		}
-		v.Views[_iViews] = _objViews.(StoryViewClass)
+		_cViews, _okViews := _objViews.(StoryViewClass)
+		if !_okViews {
+			return nil, fmt.Errorf("decode: field views: unexpected type %T", _objViews)
+		}
+		v.Views[_iViews] = _cViews
 	}
-	_ = _vhdrViews
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -1435,12 +1565,18 @@ func DecodeStoriesStoryViewsList(r *Reader) (*StoriesStoryViewsList, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -1455,9 +1591,12 @@ func DecodeStoriesStoryViewsList(r *Reader) (*StoriesStoryViewsList, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	if v.Flags.Has(0) {
 		_rNextOffset, _eNextOffset := r.ReadString()
 		if _eNextOffset != nil {
@@ -1557,11 +1696,11 @@ func (v *StoriesStealthMode) Encode(b *bytes.Buffer) error {
 // DecodeStoriesStealthMode deserializes a StoriesStealthMode from a reader using the TL binary protocol.
 func DecodeStoriesStealthMode(r *Reader) (*StoriesStealthMode, error) {
 	v := &StoriesStealthMode{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	if v.Flags.Has(0) {
 		_rActiveUntilDate, _eActiveUntilDate := r.ReadInt32()
 		if _eActiveUntilDate != nil {
@@ -1647,16 +1786,20 @@ func (v *PeerStories) Encode(b *bytes.Buffer) error {
 // DecodePeerStories deserializes a PeerStories from a reader using the TL binary protocol.
 func DecodePeerStories(r *Reader) (*PeerStories, error) {
 	v := &PeerStories{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_objPeer, _errPeer := ReadTLObject(r)
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	if v.Flags.Has(0) {
 		_rMaxReadID, _eMaxReadID := r.ReadInt32()
 		if _eMaxReadID != nil {
@@ -1667,6 +1810,9 @@ func DecodePeerStories(r *Reader) (*PeerStories, error) {
 	_vhdrStories, _ehdrStories := r.ReadUint32()
 	if _ehdrStories != nil {
 		return nil, _ehdrStories
+	}
+	if _errStories := checkVectorConstructor(_vhdrStories); _errStories != nil {
+		return nil, _errStories
 	}
 	_cntStories, _ecntStories := r.ReadUint32()
 	if _ecntStories != nil {
@@ -1681,9 +1827,12 @@ func DecodePeerStories(r *Reader) (*PeerStories, error) {
 		if _errStories != nil {
 			return nil, _errStories
 		}
-		v.Stories[_iStories] = _objStories.(StoryItemClass)
+		_cStories, _okStories := _objStories.(StoryItemClass)
+		if !_okStories {
+			return nil, fmt.Errorf("decode: field stories: unexpected type %T", _objStories)
+		}
+		v.Stories[_iStories] = _cStories
 	}
-	_ = _vhdrStories
 	return v, nil
 }
 
@@ -1731,10 +1880,17 @@ func DecodeStoriesPeerStories(r *Reader) (*StoriesPeerStories, error) {
 	if _errStories != nil {
 		return nil, _errStories
 	}
-	v.Stories = _objStories.(PeerStoriesClass)
+	_cStories, _okStories := _objStories.(PeerStoriesClass)
+	if !_okStories {
+		return nil, fmt.Errorf("decode: field stories: unexpected type %T", _objStories)
+	}
+	v.Stories = _cStories
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -1749,12 +1905,18 @@ func DecodeStoriesPeerStories(r *Reader) (*StoriesPeerStories, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -1769,9 +1931,12 @@ func DecodeStoriesPeerStories(r *Reader) (*StoriesPeerStories, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -1836,18 +2001,22 @@ func (v *StoryFwdHeader) Encode(b *bytes.Buffer) error {
 // DecodeStoryFwdHeader deserializes a StoryFwdHeader from a reader using the TL binary protocol.
 func DecodeStoryFwdHeader(r *Reader) (*StoryFwdHeader, error) {
 	v := &StoryFwdHeader{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Modified = v.Flags.Has(3)
 	if v.Flags.Has(0) {
 		_objFrom, _errFrom := ReadTLObject(r)
 		if _errFrom != nil {
 			return nil, _errFrom
 		}
-		v.From = _objFrom.(PeerClass)
+		_cFrom, _okFrom := _objFrom.(PeerClass)
+		if !_okFrom {
+			return nil, fmt.Errorf("decode: field from: unexpected type %T", _objFrom)
+		}
+		v.From = _cFrom
 	}
 	if v.Flags.Has(1) {
 		_rFromName, _eFromName := r.ReadString()
@@ -1929,11 +2098,11 @@ func (v *StoriesStoryReactionsList) Encode(b *bytes.Buffer) error {
 // DecodeStoriesStoryReactionsList deserializes a StoriesStoryReactionsList from a reader using the TL binary protocol.
 func DecodeStoriesStoryReactionsList(r *Reader) (*StoriesStoryReactionsList, error) {
 	v := &StoriesStoryReactionsList{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -1942,6 +2111,9 @@ func DecodeStoriesStoryReactionsList(r *Reader) (*StoriesStoryReactionsList, err
 	_vhdrReactions, _ehdrReactions := r.ReadUint32()
 	if _ehdrReactions != nil {
 		return nil, _ehdrReactions
+	}
+	if _errReactions := checkVectorConstructor(_vhdrReactions); _errReactions != nil {
+		return nil, _errReactions
 	}
 	_cntReactions, _ecntReactions := r.ReadUint32()
 	if _ecntReactions != nil {
@@ -1956,12 +2128,18 @@ func DecodeStoriesStoryReactionsList(r *Reader) (*StoriesStoryReactionsList, err
 		if _errReactions != nil {
 			return nil, _errReactions
 		}
-		v.Reactions[_iReactions] = _objReactions.(StoryReactionClass)
+		_cReactions, _okReactions := _objReactions.(StoryReactionClass)
+		if !_okReactions {
+			return nil, fmt.Errorf("decode: field reactions: unexpected type %T", _objReactions)
+		}
+		v.Reactions[_iReactions] = _cReactions
 	}
-	_ = _vhdrReactions
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -1976,12 +2154,18 @@ func DecodeStoriesStoryReactionsList(r *Reader) (*StoriesStoryReactionsList, err
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -1996,9 +2180,12 @@ func DecodeStoriesStoryReactionsList(r *Reader) (*StoriesStoryReactionsList, err
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	if v.Flags.Has(0) {
 		_rNextOffset, _eNextOffset := r.ReadString()
 		if _eNextOffset != nil {
@@ -2046,12 +2233,20 @@ func DecodeFoundStory(r *Reader) (*FoundStory, error) {
 	if _errPeer != nil {
 		return nil, _errPeer
 	}
-	v.Peer = _objPeer.(PeerClass)
+	_cPeer, _okPeer := _objPeer.(PeerClass)
+	if !_okPeer {
+		return nil, fmt.Errorf("decode: field peer: unexpected type %T", _objPeer)
+	}
+	v.Peer = _cPeer
 	_objStory, _errStory := ReadTLObject(r)
 	if _errStory != nil {
 		return nil, _errStory
 	}
-	v.Story = _objStory.(StoryItemClass)
+	_cStory, _okStory := _objStory.(StoryItemClass)
+	if !_okStory {
+		return nil, fmt.Errorf("decode: field story: unexpected type %T", _objStory)
+	}
+	v.Story = _cStory
 	return v, nil
 }
 
@@ -2118,11 +2313,11 @@ func (v *StoriesFoundStories) Encode(b *bytes.Buffer) error {
 // DecodeStoriesFoundStories deserializes a StoriesFoundStories from a reader using the TL binary protocol.
 func DecodeStoriesFoundStories(r *Reader) (*StoriesFoundStories, error) {
 	v := &StoriesFoundStories{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rCount, _eCount := r.ReadInt32()
 	if _eCount != nil {
 		return nil, _eCount
@@ -2131,6 +2326,9 @@ func DecodeStoriesFoundStories(r *Reader) (*StoriesFoundStories, error) {
 	_vhdrStories, _ehdrStories := r.ReadUint32()
 	if _ehdrStories != nil {
 		return nil, _ehdrStories
+	}
+	if _errStories := checkVectorConstructor(_vhdrStories); _errStories != nil {
+		return nil, _errStories
 	}
 	_cntStories, _ecntStories := r.ReadUint32()
 	if _ecntStories != nil {
@@ -2145,9 +2343,12 @@ func DecodeStoriesFoundStories(r *Reader) (*StoriesFoundStories, error) {
 		if _errStories != nil {
 			return nil, _errStories
 		}
-		v.Stories[_iStories] = _objStories.(*FoundStory)
+		_cStories, _okStories := _objStories.(*FoundStory)
+		if !_okStories {
+			return nil, fmt.Errorf("decode: field stories: unexpected type %T", _objStories)
+		}
+		v.Stories[_iStories] = _cStories
 	}
-	_ = _vhdrStories
 	if v.Flags.Has(0) {
 		_rNextOffset, _eNextOffset := r.ReadString()
 		if _eNextOffset != nil {
@@ -2158,6 +2359,9 @@ func DecodeStoriesFoundStories(r *Reader) (*StoriesFoundStories, error) {
 	_vhdrChats, _ehdrChats := r.ReadUint32()
 	if _ehdrChats != nil {
 		return nil, _ehdrChats
+	}
+	if _errChats := checkVectorConstructor(_vhdrChats); _errChats != nil {
+		return nil, _errChats
 	}
 	_cntChats, _ecntChats := r.ReadUint32()
 	if _ecntChats != nil {
@@ -2172,12 +2376,18 @@ func DecodeStoriesFoundStories(r *Reader) (*StoriesFoundStories, error) {
 		if _errChats != nil {
 			return nil, _errChats
 		}
-		v.Chats[_iChats] = _objChats.(ChatClass)
+		_cChats, _okChats := _objChats.(ChatClass)
+		if !_okChats {
+			return nil, fmt.Errorf("decode: field chats: unexpected type %T", _objChats)
+		}
+		v.Chats[_iChats] = _cChats
 	}
-	_ = _vhdrChats
 	_vhdrUsers, _ehdrUsers := r.ReadUint32()
 	if _ehdrUsers != nil {
 		return nil, _ehdrUsers
+	}
+	if _errUsers := checkVectorConstructor(_vhdrUsers); _errUsers != nil {
+		return nil, _errUsers
 	}
 	_cntUsers, _ecntUsers := r.ReadUint32()
 	if _ecntUsers != nil {
@@ -2192,9 +2402,12 @@ func DecodeStoriesFoundStories(r *Reader) (*StoriesFoundStories, error) {
 		if _errUsers != nil {
 			return nil, _errUsers
 		}
-		v.Users[_iUsers] = _objUsers.(UserClass)
+		_cUsers, _okUsers := _objUsers.(UserClass)
+		if !_okUsers {
+			return nil, fmt.Errorf("decode: field users: unexpected type %T", _objUsers)
+		}
+		v.Users[_iUsers] = _cUsers
 	}
-	_ = _vhdrUsers
 	return v, nil
 }
 
@@ -2291,11 +2504,11 @@ func (v *StoryAlbum) Encode(b *bytes.Buffer) error {
 // DecodeStoryAlbum deserializes a StoryAlbum from a reader using the TL binary protocol.
 func DecodeStoryAlbum(r *Reader) (*StoryAlbum, error) {
 	v := &StoryAlbum{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	_rAlbumID, _eAlbumID := r.ReadInt32()
 	if _eAlbumID != nil {
 		return nil, _eAlbumID
@@ -2311,14 +2524,22 @@ func DecodeStoryAlbum(r *Reader) (*StoryAlbum, error) {
 		if _errIconPhoto != nil {
 			return nil, _errIconPhoto
 		}
-		v.IconPhoto = _objIconPhoto.(PhotoClass)
+		_cIconPhoto, _okIconPhoto := _objIconPhoto.(PhotoClass)
+		if !_okIconPhoto {
+			return nil, fmt.Errorf("decode: field icon_photo: unexpected type %T", _objIconPhoto)
+		}
+		v.IconPhoto = _cIconPhoto
 	}
 	if v.Flags.Has(1) {
 		_objIconVideo, _errIconVideo := ReadTLObject(r)
 		if _errIconVideo != nil {
 			return nil, _errIconVideo
 		}
-		v.IconVideo = _objIconVideo.(DocumentClass)
+		_cIconVideo, _okIconVideo := _objIconVideo.(DocumentClass)
+		if !_okIconVideo {
+			return nil, fmt.Errorf("decode: field icon_video: unexpected type %T", _objIconVideo)
+		}
+		v.IconVideo = _cIconVideo
 	}
 	return v, nil
 }
@@ -2415,6 +2636,9 @@ func DecodeStoriesAlbums(r *Reader) (*StoriesAlbums, error) {
 	if _ehdrAlbums != nil {
 		return nil, _ehdrAlbums
 	}
+	if _errAlbums := checkVectorConstructor(_vhdrAlbums); _errAlbums != nil {
+		return nil, _errAlbums
+	}
 	_cntAlbums, _ecntAlbums := r.ReadUint32()
 	if _ecntAlbums != nil {
 		return nil, _ecntAlbums
@@ -2428,9 +2652,12 @@ func DecodeStoriesAlbums(r *Reader) (*StoriesAlbums, error) {
 		if _errAlbums != nil {
 			return nil, _errAlbums
 		}
-		v.Albums[_iAlbums] = _objAlbums.(*StoryAlbum)
+		_cAlbums, _okAlbums := _objAlbums.(*StoryAlbum)
+		if !_okAlbums {
+			return nil, fmt.Errorf("decode: field albums: unexpected type %T", _objAlbums)
+		}
+		v.Albums[_iAlbums] = _cAlbums
 	}
-	_ = _vhdrAlbums
 	return v, nil
 }
 
@@ -2481,11 +2708,11 @@ func (v *RecentStory) Encode(b *bytes.Buffer) error {
 // DecodeRecentStory deserializes a RecentStory from a reader using the TL binary protocol.
 func DecodeRecentStory(r *Reader) (*RecentStory, error) {
 	v := &RecentStory{}
-	{
-		var _f uint32
-		_f, _ = r.ReadUint32()
-		v.Flags = Fields(_f)
+	_rFlags, _eFlags := r.ReadUint32()
+	if _eFlags != nil {
+		return nil, _eFlags
 	}
+	v.Flags = Fields(_rFlags)
 	v.Live = v.Flags.Has(0)
 	if v.Flags.Has(1) {
 		_rMaxID, _eMaxID := r.ReadInt32()

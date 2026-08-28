@@ -72,6 +72,10 @@ func TestConnStateTransitions(t *testing.T) {
 	if cs.State() != ConnStateClosed {
 		t.Fatal("SetReconnecting on closed should be no-op")
 	}
+	cs.SetConnected()
+	if cs.State() != ConnStateClosed {
+		t.Fatal("SetConnected on closed should be no-op")
+	}
 }
 
 func TestConnStateRecordTimestamps(t *testing.T) {
@@ -180,7 +184,12 @@ func TestConnStateBackwardCompat(t *testing.T) {
 }
 
 func TestBackoffConfig(t *testing.T) {
-	cfg := defaultBackoffConfig
+	// Use a jitter-free config for deterministic delay checks.
+	cfg := backoffConfig{
+		BaseDelay:  1 * time.Second,
+		MaxDelay:   60 * time.Second,
+		Multiplier: 2.0,
+	}
 
 	if d := cfg.delay(0); d != cfg.BaseDelay {
 		t.Fatalf("delay(0) = %v, want %v", d, cfg.BaseDelay)
@@ -190,6 +199,16 @@ func TestBackoffConfig(t *testing.T) {
 	}
 	if d := cfg.delay(10); d != cfg.MaxDelay {
 		t.Fatalf("delay(10) = %v, want MaxDelay %v", d, cfg.MaxDelay)
+	}
+
+	// Verify jitter is applied when Jitter > 0.
+	jittered := defaultBackoffConfig // Jitter: 0.1
+	base := time.Duration(float64(jittered.BaseDelay) * jittered.Multiplier)
+	d := jittered.delay(1)
+	lo := time.Duration(float64(base) * (1 - jittered.Jitter))
+	hi := time.Duration(float64(base) * (1 + jittered.Jitter))
+	if d < lo || d > hi {
+		t.Fatalf("jittered delay(1) = %v, want within [%v, %v]", d, lo, hi)
 	}
 }
 
@@ -222,7 +241,7 @@ func TestReconnectManagerPreventDuplicates(t *testing.T) {
 
 func TestReconnectManagerMaxAttempts(t *testing.T) {
 	client, _ := NewClient(12345, "hash", &Config{InMemory: true})
-	client.state.SetConnecting(2)
+	client.floodGate = nil // disable flood throttle for rapid reconnect test
 	client.state.SetConnected()
 
 	cfg := backoffConfig{
@@ -246,6 +265,50 @@ func TestReconnectManagerMaxAttempts(t *testing.T) {
 	h := client.Health()
 	if h.State != ConnStateDisconnected {
 		t.Fatalf("state = %v, want disconnected", h.State)
+	}
+}
+
+func TestReconnectManagerStaleGenerationCannotOverwriteConnectedState(t *testing.T) {
+	client, _ := NewClient(12345, "hash", &Config{ReconnectEnabled: true})
+	rm := client.reconnectMgr
+	currentDone := make(chan struct{})
+	rm.mu.Lock()
+	rm.done = currentDone
+	rm.mu.Unlock()
+	client.state.SetConnecting(2)
+	client.state.SetConnected()
+	published := false
+
+	if rm.publishLifecycleError(currentDone, func() { published = true }) {
+		t.Fatal("connected replacement accepted stale reconnect publication")
+	}
+	if published {
+		t.Fatal("stale reconnect callback ran")
+	}
+	if got := client.state.State(); got != ConnStateConnected {
+		t.Fatalf("state = %v, want connected", got)
+	}
+}
+
+func TestReconnectManagerBurstDetection(t *testing.T) {
+	rm := newReconnectManager(nil, defaultBackoffConfig)
+	now := time.Now()
+
+	for i := 1; i <= reconnectBurstThreshold; i++ {
+		attempt, exceeded := rm.recordAttempt(now.Add(time.Duration(i) * time.Millisecond))
+		if exceeded {
+			t.Fatalf("attempt %d exceeded burst threshold early", attempt)
+		}
+	}
+
+	attempt, exceeded := rm.recordAttempt(now.Add((reconnectBurstThreshold + 1) * time.Millisecond))
+	if !exceeded {
+		t.Fatalf("attempt %d did not exceed burst threshold", attempt)
+	}
+
+	attempt, exceeded = rm.recordAttempt(now.Add(reconnectBurstWindow + 2*time.Millisecond))
+	if exceeded {
+		t.Fatalf("attempt %d exceeded after burst window reset", attempt)
 	}
 }
 
@@ -305,33 +368,23 @@ func TestMigrationUnknownType(t *testing.T) {
 	}
 }
 
-func TestMigrationUnsafeNonIdempotent(t *testing.T) {
+func TestMigrationRedirectDoesNotRejectNonIdempotentQuery(t *testing.T) {
 	client, _ := NewClient(12345, "hash", &Config{InMemory: true})
 	client.state.SetConnecting(2)
 	client.state.SetConnected()
 	client.storage = NewMemoryStorage()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	query := &tg.MessagesSendMessageRequest{}
 	rpcErr := &tgerr.Error{Code: 303, Type: "PHONE_MIGRATE", Argument: 4}
-	_, err := client.handleMigrationError(context.Background(), rpcErr, query)
+	_, err := client.handleMigrationError(ctx, rpcErr, query)
 	var unsafeErr *UnsafeMigrationError
-	if !errors.As(err, &unsafeErr) {
-		t.Fatalf("got %T, want *UnsafeMigrationError", err)
+	if errors.As(err, &unsafeErr) {
+		t.Fatalf("server-confirmed redirect must not be rejected as unsafe: %v", err)
 	}
-	if unsafeErr.TargetDC != 4 {
-		t.Fatalf("TargetDC = %d, want 4", unsafeErr.TargetDC)
-	}
-}
-
-func TestIsIdempotent(t *testing.T) {
-	if isIdempotent(nil) {
-		t.Fatal("nil should not be idempotent")
-	}
-	if isIdempotent(&tg.MessagesSendMessageRequest{}) {
-		t.Fatal("MessagesSendMessage should not be idempotent")
-	}
-	if !isIdempotent(&tg.AuthExportAuthorizationRequest{}) {
-		t.Fatal("AuthExportAuthorization should be idempotent")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context cancellation", err)
 	}
 }
 
@@ -414,10 +467,10 @@ func TestCloseStopsEverything(t *testing.T) {
 }
 
 func TestTriggerReconnectDisabled(t *testing.T) {
-	client, _ := NewClient(12345, "hash", &Config{
-		InMemory:         true,
-		ReconnectEnabled: false,
-	})
+	client, _ := NewClient(12345, "hash", &Config{InMemory: true})
+	client.cfgMu.Lock()
+	client.cfg.ReconnectEnabled = false
+	client.cfgMu.Unlock()
 	client.state.SetConnecting(2)
 	client.state.SetConnected()
 	client.storage = NewMemoryStorage()
@@ -492,6 +545,33 @@ func TestConfigReconnectOverrides(t *testing.T) {
 	}
 }
 
+func TestDCOptionsFromConfig(t *testing.T) {
+	cfg := &tg.Config{
+		TestMode: true,
+		DCOptions: []*tg.DCOption{
+			{ID: 2, IpAddress: "149.154.167.51", Port: 443},
+			{ID: 2, IpAddress: "2001:b28:f23d:f001::e", Port: 443, IPv6: true},
+			{ID: 2, IpAddress: "149.154.167.52", Port: 80, MediaOnly: true},
+			{ID: 2, IpAddress: "149.154.167.53", Port: 443, CDN: true},
+			{ID: 2, IpAddress: "149.154.167.54", Port: 443, TcpoOnly: true},
+			{ID: 3, IpAddress: "149.154.175.100", Port: 443},
+			{ID: 2, IpAddress: "", Port: 443},
+			{ID: 2, IpAddress: "149.154.167.55"},
+		},
+	}
+
+	got := dcOptionsFromConfig(cfg, 2, false)
+	if len(got) != 2 {
+		t.Fatalf("dcOptionsFromConfig len = %d, want 2", len(got))
+	}
+	if got[0].Address() != "149.154.167.51" || got[0].Port() != 443 || !got[0].TestMode {
+		t.Fatalf("first option = %+v", got[0])
+	}
+	if got[1].Address() != "2001:b28:f23d:f001::e" || !got[1].IPv6 {
+		t.Fatalf("second option = %+v", got[1])
+	}
+}
+
 func TestMemoryStorageImplementsDCAuthStore(t *testing.T) {
 	var _ storage.DCAuthStore = NewMemoryStorage()
 }
@@ -531,15 +611,16 @@ func TestInvokeMigrationOn303Error(t *testing.T) {
 	client.storage = NewMemoryStorage()
 
 	migrating := &tgerr.Error{Code: 303, Type: "PHONE_MIGRATE", Argument: 4}
-	_, err := client.handleMigrationError(context.Background(), migrating, &tg.MessagesSendMessageRequest{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := client.handleMigrationError(ctx, migrating, &tg.MessagesSendMessageRequest{})
 	var unsafeErr *UnsafeMigrationError
-	if !errors.As(err, &unsafeErr) {
-		t.Fatalf("got %T, want *UnsafeMigrationError", err)
+	if errors.As(err, &unsafeErr) {
+		t.Fatalf("server-confirmed redirect must not be rejected as unsafe: %v", err)
 	}
-
-	result, err := client.handleMigrationError(context.Background(), migrating, &tg.AuthExportAuthorizationRequest{})
-	_ = result
-	_ = err
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context cancellation", err)
+	}
 }
 
 func TestConnStateString(t *testing.T) {

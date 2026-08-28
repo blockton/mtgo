@@ -30,8 +30,30 @@ func (f *MsgFactory) AllocateSeqNo(contentRelated bool) int32 {
 	return f.seqNoGen.Next(contentRelated)
 }
 
+// AllocateMsgIDAndSeqNo atomically allocates both a message ID and sequence
+// number, preventing interleaving between concurrent Send calls when strict
+// ordering is required. In practice the MTProto server validates msg_id and
+// seq_no independently, so the separate calls are correct for normal use (#33).
+func (f *MsgFactory) AllocateMsgIDAndSeqNo(contentRelated bool) (int64, int32) {
+	return f.msgIDGen.Next(), f.seqNoGen.Next(contentRelated)
+}
+
 // UpdateServerTime forwards the updated server time to the underlying message
 // ID generator.
 func (f *MsgFactory) UpdateServerTime(t time.Time) {
 	f.msgIDGen.UpdateServerTime(t)
+}
+
+// AdvanceServerTime monotonically refines the server-time offset from an
+// inbound message timestamp. See MsgIDGenerator.AdvanceOffset.
+func (f *MsgFactory) AdvanceServerTime(t time.Time) {
+	f.msgIDGen.AdvanceOffset(t)
+}
+
+// ServerTimeOffset returns the current server-time offset in seconds
+// (server_time - local_time). Callers that need to compare server-provided
+// timestamps (e.g. salt validity windows) against the current time should add
+// this offset to time.Now() rather than using wall clock directly.
+func (f *MsgFactory) ServerTimeOffset() int64 {
+	return f.msgIDGen.timeOffset.Load()
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/binary"
 	"fmt"
 	"math/big"
@@ -57,7 +58,7 @@ type Auth struct {
 	// TestMode indicates that the connection is using Telegram test servers.
 	TestMode bool
 	// keySet is the trusted-key set used for fingerprint verification. When
-	// nil, the static crypto.ServerPublicKeys map is used (backward compat).
+	// nil, the static crypto.ServerKeyFingerprints are used (backward compat).
 	keySet *crypto.RSAKeySet
 }
 
@@ -125,11 +126,7 @@ func (a *Auth) recvUnencrypted(conn authTransport) (tg.TLObject, error) {
 }
 
 func knownFingerprints() []int64 {
-	fps := make([]int64, 0, len(crypto.ServerPublicKeys))
-	for fp := range crypto.ServerPublicKeys {
-		fps = append(fps, fp)
-	}
-	return fps
+	return crypto.ServerKeyFingerprints()
 }
 
 func (a *Auth) findKeyFingerprint(fingerprints []int64) (int64, bool) {
@@ -159,6 +156,44 @@ func (a *Auth) generateRandomBN(bits int) (*big.Int, error) {
 	}
 	b[0] |= 0x80
 	return new(big.Int).SetBytes(b), nil
+}
+
+func factorPQ(pqBytes []byte) (int64, int64, error) {
+	if len(pqBytes) == 0 || len(pqBytes) > 8 {
+		return 0, 0, fmt.Errorf("session: invalid pq length %d", len(pqBytes))
+	}
+	pqBig := new(big.Int).SetBytes(pqBytes)
+	if !pqBig.IsInt64() || pqBig.Int64() <= 3 {
+		return 0, 0, fmt.Errorf("session: invalid pq value")
+	}
+
+	pq := pqBig.Int64()
+	p := crypto.Decompose(pq)
+	if p <= 1 || pq%p != 0 {
+		return 0, 0, fmt.Errorf("session: pq factorization failed")
+	}
+	q := pq / p
+	if q <= 1 || p == q || !big.NewInt(p).ProbablyPrime(32) || !big.NewInt(q).ProbablyPrime(32) {
+		return 0, 0, fmt.Errorf("session: pq factors are invalid")
+	}
+	if p > q {
+		p, q = q, p
+	}
+	return p, q, nil
+}
+
+func validateDHGenResponse(nonce, serverNonce, expectedNonce, expectedServerNonce [16]byte, gotHash [16]byte, newNonce, authKey []byte, hashNumber byte) error {
+	if nonce != expectedNonce {
+		return ErrNonceMismatch
+	}
+	if serverNonce != expectedServerNonce {
+		return ErrServerNonceMismatch
+	}
+	expectedHash := computeNewNonceHash(newNonce, authKey, hashNumber)
+	if subtle.ConstantTimeCompare(gotHash[:], expectedHash) != 1 {
+		return ErrNewNonceHashMismatch
+	}
+	return nil
 }
 
 // Create performs the complete MTProto key generation handshake over the
@@ -198,17 +233,6 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 		return nil, ErrNonceMismatch
 	}
 
-	pqBig := new(big.Int).SetBytes([]byte(resPQ.PQ))
-	pqInt64 := pqBig.Int64()
-	pVal := crypto.Decompose(pqInt64)
-	qVal := pqInt64 / pVal
-	if pVal > qVal {
-		pVal, qVal = qVal, pVal
-	}
-
-	pStr := string(big.NewInt(pVal).Bytes())
-	qStr := string(big.NewInt(qVal).Bytes())
-
 	fp, ok := a.findKeyFingerprint(resPQ.ServerPublicKeyFingerprints)
 	if !ok {
 		// Typed error for MITM detection (FR-014). Returns KeyVerificationError
@@ -219,6 +243,12 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 			Expected: a.trustedFingerprints(),
 		}
 	}
+	pVal, qVal, err := factorPQ([]byte(resPQ.PQ))
+	if err != nil {
+		return nil, fmt.Errorf("step 4: %w", err)
+	}
+	pStr := string(big.NewInt(pVal).Bytes())
+	qStr := string(big.NewInt(qVal).Bytes())
 
 	newNonce, err := randomInt256()
 	if err != nil {
@@ -281,8 +311,24 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 
 	switch v := obj.(type) {
 	case *tg.ServerDHParamsFail:
+		if v.Nonce != nonce {
+			return nil, ErrNonceMismatch
+		}
+		if v.ServerNonce != resPQ.ServerNonce {
+			return nil, ErrServerNonceMismatch
+		}
+		expectedHash := sha1Hash(newNonce[:])[4:20]
+		if subtle.ConstantTimeCompare(v.NewNonceHash[:], expectedHash) != 1 {
+			return nil, ErrNewNonceHashMismatch
+		}
 		return nil, ErrDHParamsFail
 	case *tg.ServerDHParamsOk:
+		if v.Nonce != nonce {
+			return nil, ErrNonceMismatch
+		}
+		if v.ServerNonce != resPQ.ServerNonce {
+			return nil, ErrServerNonceMismatch
+		}
 		key, iv := computeKeyAndIV(newNonce[:], resPQ.ServerNonce[:])
 		decrypted, err := crypto.IGEDecrypt([]byte(v.EncryptedAnswer), key, iv)
 		if err != nil {
@@ -312,10 +358,6 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 			return nil, ErrServerNonceMismatch
 		}
 
-		if v.ServerNonce != resPQ.ServerNonce {
-			return nil, ErrServerNonceMismatch
-		}
-
 		dhPrime := new(big.Int).SetBytes([]byte(dhInner.DHPrime))
 		if dhPrime.BitLen() != 2048 {
 			return nil, fmt.Errorf("%w: bit length %d", ErrDHPrimeInvalid, dhPrime.BitLen())
@@ -324,7 +366,7 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 		// spec requires a SAFE 2048-bit prime (both p and (p-1)/2 prime); rather
 		// than re-validate the safe-prime property of an arbitrary server-supplied
 		// value, reject anything that is not the known constant.
-		if dhPrime.Cmp(crypto.CurrentDHPrime) != 0 {
+		if dhPrime.Cmp(crypto.GetDHPrime()) != 0 {
 			return nil, ErrDHPrimeInvalid
 		}
 
@@ -363,7 +405,7 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 			return nil, ErrGBOutOfRange
 		}
 
-		authKey := computeAuthKey(gA, b, dhPrime)
+		authKey := normalizeAuthKey(computeAuthKey(gA, b, dhPrime))
 
 		authKeyAuxHash := func() int64 {
 			h := sha1.Sum(authKey)
@@ -415,24 +457,8 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 
 			switch v := obj.(type) {
 			case *tg.DHGenOk:
-				if v.Nonce != nonce {
-					return nil, ErrNonceMismatch
-				}
-				if v.ServerNonce != resPQ.ServerNonce {
-					return nil, ErrServerNonceMismatch
-				}
-
-				if len(authKey) < 256 {
-					padded := make([]byte, 256)
-					copy(padded[256-len(authKey):], authKey)
-					authKey = padded
-				} else {
-					authKey = authKey[:256]
-				}
-
-				expectedHash := computeNewNonceHash1(newNonce[:], authKey)
-				if !bytes.Equal(v.NewNonceHash1[:], expectedHash) {
-					return nil, ErrNewNonceHashMismatch
+				if err := validateDHGenResponse(v.Nonce, v.ServerNonce, nonce, resPQ.ServerNonce, v.NewNonceHash1, newNonce[:], authKey, 1); err != nil {
+					return nil, err
 				}
 
 				salt := computeServerSalt(newNonce[:], resPQ.ServerNonce[:])
@@ -444,8 +470,8 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 				}, nil
 
 			case *tg.DHGenRetry:
-				if v.ServerNonce != resPQ.ServerNonce {
-					return nil, ErrServerNonceMismatch
+				if err := validateDHGenResponse(v.Nonce, v.ServerNonce, nonce, resPQ.ServerNonce, v.NewNonceHash2, newNonce[:], authKey, 2); err != nil {
+					return nil, err
 				}
 				retryID = authKeyAuxHash()
 				var retryErr error
@@ -454,11 +480,11 @@ func (a *Auth) createKey(conn authTransport, tempExpiresIn int32) (*AuthResult, 
 					return nil, fmt.Errorf("step 10: retry DH secret: %w", retryErr)
 				}
 				gB = new(big.Int).Exp(g, b, dhPrime)
-				authKey = computeAuthKey(gA, b, dhPrime)
+				authKey = normalizeAuthKey(computeAuthKey(gA, b, dhPrime))
 
 			case *tg.DHGenFail:
-				if v.ServerNonce != resPQ.ServerNonce {
-					return nil, ErrServerNonceMismatch
+				if err := validateDHGenResponse(v.Nonce, v.ServerNonce, nonce, resPQ.ServerNonce, v.NewNonceHash3, newNonce[:], authKey, 3); err != nil {
+					return nil, err
 				}
 				return nil, ErrDHGenFail
 

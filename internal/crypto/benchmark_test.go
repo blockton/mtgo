@@ -17,6 +17,7 @@ var (
 	benchMsgKey    [16]byte
 	benchPlaintext []byte
 	benchEncrypted []byte
+	benchPacked    []byte
 )
 
 func init() {
@@ -40,7 +41,24 @@ func BenchmarkCryptoPack(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		_, err := Pack(msg, benchSalt, benchSessionID[:], benchAuthKey[:], benchAuthKeyID[:])
+		var err error
+		benchPacked, err = Pack(msg, benchSalt, benchSessionID[:], benchAuthKey[:], benchAuthKeyID[:])
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCryptoPackRaw(b *testing.B) {
+	var body bytes.Buffer
+	if err := (&tg.Pong{MsgID: 123456, PingID: 42}).Encode(&body); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		var err error
+		benchPacked, err = PackRaw(123456, 1, body.Bytes(), benchSalt, benchSessionID[:], benchAuthKey[:], benchAuthKeyID[:])
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -143,18 +161,18 @@ func BenchmarkSecretKDF(b *testing.B) {
 // --- DH validation (called once per secret chat creation) ---
 
 func BenchmarkValidateGA(b *testing.B) {
-	ga := makeTestGA(CurrentDHPrime)
+	ga := makeTestGA(currentDHPrime)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		ValidateGA(ga, CurrentDHPrime)
+		ValidateGA(ga, currentDHPrime)
 	}
 }
 
 func BenchmarkValidateDHPrime(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		ValidateDHPrime(CurrentDHPrime)
+		ValidateDHPrime(currentDHPrime)
 	}
 }
 

@@ -96,11 +96,25 @@ func (r *Reader) ReadBool() (bool, error) {
 	return id == BoolTrueID, nil
 }
 
+// ReadRawBytes returns n bytes as a slice into the internal buffer — caller
+// MUST copy if the data needs to outlive the Reader (e.g. after ReleaseReader).
 func (r *Reader) ReadRawBytes(n int) ([]byte, error) {
 	if r.off+n > len(r.b) {
 		return nil, io.ErrUnexpectedEOF
 	}
 	v := r.b[r.off : r.off+n]
+	r.off += n
+	return v, nil
+}
+
+// ReadRawBytesCopy allocates a new slice for callers that need ownership of
+// the returned bytes past the Reader's lifetime.
+func (r *Reader) ReadRawBytesCopy(n int) ([]byte, error) {
+	if r.off+n > len(r.b) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	v := make([]byte, n)
+	copy(v, r.b[r.off:r.off+n])
 	r.off += n
 	return v, nil
 }
@@ -175,7 +189,9 @@ func (r *Reader) ReadVectorInt() ([]int32, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = hdr
+	if err := checkVectorConstructor(hdr); err != nil {
+		return nil, err
+	}
 	count, err := r.ReadUint32()
 	if err != nil {
 		return nil, err
@@ -202,7 +218,9 @@ func (r *Reader) ReadVectorLong() ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = hdr
+	if err := checkVectorConstructor(hdr); err != nil {
+		return nil, err
+	}
 	count, err := r.ReadUint32()
 	if err != nil {
 		return nil, err
@@ -229,7 +247,9 @@ func (r *Reader) ReadVectorString() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = hdr
+	if err := checkVectorConstructor(hdr); err != nil {
+		return nil, err
+	}
 	count, err := r.ReadUint32()
 	if err != nil {
 		return nil, err
@@ -253,7 +273,9 @@ func (r *Reader) ReadVectorBytes() ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = hdr
+	if err := checkVectorConstructor(hdr); err != nil {
+		return nil, err
+	}
 	count, err := r.ReadUint32()
 	if err != nil {
 		return nil, err

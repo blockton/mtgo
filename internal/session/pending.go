@@ -3,6 +3,7 @@ package session
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/mtgo-labs/mtgo/tg"
 )
@@ -11,13 +12,28 @@ import (
 // use: the receive loop calls complete (via Resolve/Reject) while the caller
 // goroutine waits on Done.
 type CallHandle struct {
-	done      chan struct{} // closed exactly once on completion
-	once      sync.Once     // ensures single-shot close(done)
-	mu        sync.Mutex    // protects result, rawResult, err
-	result    tg.TLObject   // stored decoded TL result
-	rawResult []byte        // stored raw result bytes
-	err       error         // stored error
-	isRaw     bool          // true for SendRaw waiters
+	done          chan struct{} // closed exactly once on completion
+	once          sync.Once     // ensures single-shot close(done)
+	mu            sync.Mutex    // protects result, rawResult, err, and resend data
+	result        tg.TLObject   // stored decoded TL result
+	rawResult     []byte        // stored raw result bytes
+	err           error         // stored error
+	isRaw         bool          // true for SendRaw waiters
+	sentAt        int64         // unix-nano timestamp when the query was sent (for state checks)
+	acked         atomic.Bool   // true when the server acknowledged receipt
+	payload       []byte        // encrypted payload for re-send on msg_resend_req
+	resendSeqNo   uint32
+	resendBodyRaw []byte
+}
+
+// SentAt returns the time the query was sent.
+func (h *CallHandle) SentAt() time.Time {
+	return time.Unix(0, h.sentAt)
+}
+
+// IsAcked reports whether the server has acknowledged receipt of this query.
+func (h *CallHandle) IsAcked() bool {
+	return h.acked.Load()
 }
 
 // Done returns a channel that is closed when the handle is completed.
@@ -31,6 +47,39 @@ func (h *CallHandle) Result() (tg.TLObject, []byte, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.result, h.rawResult, h.err
+}
+
+// StorePayload stores the encrypted payload for later re-send on msg_resend_req.
+func (h *CallHandle) StorePayload(p []byte) {
+	h.mu.Lock()
+	h.payload = p
+	h.mu.Unlock()
+}
+
+// GetPayload returns the stored encrypted payload, or nil if none was stored.
+func (h *CallHandle) GetPayload() []byte {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.payload
+}
+
+// StoreResendMessage stores a serialized message body and sequence number for
+// re-encryption if Telegram requests a batched child message again.
+func (h *CallHandle) StoreResendMessage(seqNo uint32, body []byte) {
+	h.mu.Lock()
+	h.resendSeqNo = seqNo
+	h.resendBodyRaw = body
+	h.mu.Unlock()
+}
+
+// GetResendMessage returns the serialized message data stored for re-send.
+func (h *CallHandle) GetResendMessage() (uint32, []byte, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.resendBodyRaw == nil {
+		return 0, nil, false
+	}
+	return h.resendSeqNo, h.resendBodyRaw, true
 }
 
 // complete is the shared completion path. fn is called inside the mutex to
@@ -51,11 +100,12 @@ func (h *CallHandle) complete(fn func()) bool {
 // PendingManager owns the lifecycle of all pending RPC calls for a session.
 // Resolve/Reject/Cancel never block on caller behavior.
 type PendingManager struct {
-	mu           sync.Mutex
-	pending      map[int64]*CallHandle
-	maxPending   int64
-	totalPending atomic.Int64
-	rawPending   atomic.Int64
+	mu             sync.Mutex
+	pending        map[int64]*CallHandle
+	maxPending     int64
+	totalPending   atomic.Int64
+	rawPending     atomic.Int64
+	decodedPending atomic.Int64
 }
 
 func NewPendingManager() *PendingManager {
@@ -85,14 +135,17 @@ func (pm *PendingManager) Register(msgID int64, isRaw bool) (*CallHandle, error)
 		return nil, ErrBusy
 	}
 	h := &CallHandle{
-		done:  make(chan struct{}),
-		isRaw: isRaw,
+		done:   make(chan struct{}),
+		isRaw:  isRaw,
+		sentAt: time.Now().UnixNano(),
 	}
 	pm.pending[msgID] = h
 	pm.mu.Unlock()
 	pm.totalPending.Add(1)
 	if isRaw {
 		pm.rawPending.Add(1)
+	} else {
+		pm.decodedPending.Add(1)
 	}
 	return h, nil
 }
@@ -125,8 +178,9 @@ func (pm *PendingManager) ResolveRaw(msgID int64, data []byte) bool {
 }
 
 // ResolveRPCResult handles an incoming raw RPC result payload for reqMsgID.
-// It resolves raw waiters immediately. Returns true if a decoded waiter
-// exists — the caller should decode the payload and call Resolve.
+// It takes ownership of rawPayload and resolves raw waiters immediately.
+// Returns true if a decoded waiter exists — the caller should decode the
+// payload and call Resolve.
 func (pm *PendingManager) ResolveRPCResult(reqMsgID int64, rawPayload []byte) bool {
 	pm.mu.Lock()
 	h, ok := pm.pending[reqMsgID]
@@ -139,9 +193,7 @@ func (pm *PendingManager) ResolveRPCResult(reqMsgID int64, rawPayload []byte) bo
 		delete(pm.pending, reqMsgID)
 		pm.mu.Unlock()
 		h.complete(func() {
-			cp := make([]byte, len(rawPayload))
-			copy(cp, rawPayload)
-			h.rawResult = cp
+			h.rawResult = rawPayload[:len(rawPayload):len(rawPayload)]
 		})
 		pm.dec(h)
 		return false
@@ -180,13 +232,15 @@ func (pm *PendingManager) Cancel(msgID int64) bool {
 func (pm *PendingManager) RejectAll(err error) {
 	pm.mu.Lock()
 	handles := make([]*CallHandle, 0, len(pm.pending))
-	var total, raw int64
+	var total, raw, decoded int64
 	for msgID, h := range pm.pending {
 		handles = append(handles, h)
 		delete(pm.pending, msgID)
 		total++
 		if h.isRaw {
 			raw++
+		} else {
+			decoded++
 		}
 	}
 	pm.mu.Unlock()
@@ -195,6 +249,7 @@ func (pm *PendingManager) RejectAll(err error) {
 	}
 	pm.totalPending.Add(-total)
 	pm.rawPending.Add(-raw)
+	pm.decodedPending.Add(-decoded)
 }
 
 // Has reports whether a specific msgID has a pending handle.
@@ -223,65 +278,67 @@ func (pm *PendingManager) HasAnyRaw() bool {
 	return pm.rawPending.Load() > 0
 }
 
+// HasAnyDecoded reports whether any pending call requires TL decoding.
+func (pm *PendingManager) HasAnyDecoded() bool {
+	return pm.decodedPending.Load() > 0
+}
+
 // Count returns the number of active pending calls.
 func (pm *PendingManager) Count() int64 {
 	return pm.totalPending.Load()
 }
 
-// MarkAllUnknown transitions all pending (acked or unacked) queries to the
-// unknown state. Called on transport disconnect to mark queries whose fate is
-// unknown until recovery queries are sent on reconnect.
-// Ported from td/td/telegram/net/Session.cpp:700-734 (sent_queries_ → unknown_queries_).
-func (pm *PendingManager) MarkAllUnknown() []int64 {
+// MarkAcked marks the pending handle for msgID as acknowledged by the server.
+// No-op if the message is not pending or already completed.
+func (pm *PendingManager) MarkAcked(msgID int64) {
 	pm.mu.Lock()
-	ids := make([]int64, 0, len(pm.pending))
-	for msgID := range pm.pending {
-		ids = append(ids, msgID)
-	}
+	h, ok := pm.pending[msgID]
 	pm.mu.Unlock()
-	return ids
+	if ok {
+		h.acked.Store(true)
+	}
 }
 
-// GetUnknown returns the message IDs of all pending queries (which are now
-// considered "unknown" after MarkAllUnknown was called). These are the queries
-// that need recovery via msgs_state_req on reconnect.
-func (pm *PendingManager) GetUnknown() []int64 {
+// GetPayload returns the stored encrypted payload for msgID, or nil if not found.
+func (pm *PendingManager) GetPayload(msgID int64) []byte {
 	pm.mu.Lock()
-	ids := make([]int64, 0, len(pm.pending))
-	for msgID := range pm.pending {
-		ids = append(ids, msgID)
-	}
+	h, ok := pm.pending[msgID]
 	pm.mu.Unlock()
-	return ids
+	if !ok {
+		return nil
+	}
+	return h.GetPayload()
 }
 
-// RejectExcessUnknowns rejects pending queries beyond the given cap with
-// ErrTooManyPending. Returns the number of rejected queries.
-// Ported from td/td/telegram/net/Session.cpp:1297-1309 (MAX_INFLIGHT_QUERIES check).
-func (pm *PendingManager) RejectExcessUnknowns(cap int) int {
+// GetResendMessage returns serialized message data for a batched pending call.
+func (pm *PendingManager) GetResendMessage(msgID int64) (uint32, []byte, bool) {
 	pm.mu.Lock()
-	if len(pm.pending) <= cap {
-		pm.mu.Unlock()
-		return 0
-	}
-	// Collect excess IDs (keep earliest registered, reject newest)
-	excess := make([]int64, 0)
-	count := 0
-	for msgID := range pm.pending {
-		count++
-		if count > cap {
-			excess = append(excess, msgID)
-		}
-	}
+	h, ok := pm.pending[msgID]
 	pm.mu.Unlock()
-
-	rejected := 0
-	for _, msgID := range excess {
-		if pm.Reject(msgID, ErrTooManyPending) {
-			rejected++
-		}
+	if !ok {
+		return 0, nil, false
 	}
-	return rejected
+	return h.GetResendMessage()
+}
+
+// OverduePending returns the message IDs of content-related pending queries
+// that have been sent more than threshold ago and have not been acknowledged.
+// These are candidates for msgs_state_req reconciliation.
+func (pm *PendingManager) OverduePending(threshold time.Duration) []int64 {
+	cutoff := time.Now().Add(-threshold).UnixNano()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	var ids []int64
+	for msgID, h := range pm.pending {
+		if h.acked.Load() {
+			continue
+		}
+		if h.sentAt > cutoff {
+			continue
+		}
+		ids = append(ids, msgID)
+	}
+	return ids
 }
 
 // remove extracts and deletes the handle from the map.
@@ -300,5 +357,7 @@ func (pm *PendingManager) dec(h *CallHandle) {
 	pm.totalPending.Add(-1)
 	if h.isRaw {
 		pm.rawPending.Add(-1)
+	} else {
+		pm.decodedPending.Add(-1)
 	}
 }
