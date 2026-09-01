@@ -7,7 +7,7 @@ import (
 // --- Markdown parsing ---
 
 func BenchmarkParseMarkdownSimple(b *testing.B) {
-	text := "**bold** and _italic_ text"
+	text := "*bold* and _italic_ text"
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _, _ = Parse(ParseModeMarkdown, text)
@@ -15,7 +15,7 @@ func BenchmarkParseMarkdownSimple(b *testing.B) {
 }
 
 func BenchmarkParseMarkdownComplex(b *testing.B) {
-	text := "**bold** _italic_ `code` ```pre``` [link](https://example.com) __underline__ ~~strike~~"
+	text := "*bold* _italic_ `code` ```pre``` [link](https://example.com) __underline__ ~strike~"
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _, _ = Parse(ParseModeMarkdown, text)

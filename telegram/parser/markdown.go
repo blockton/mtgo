@@ -10,6 +10,12 @@ import (
 
 // MarkdownParser parses Telegram MarkdownV2-formatted text into plain text
 // and message entities by converting to HTML and delegating to HTMLParser.
+//
+// The implemented syntax follows the official Bot API "MarkdownV2 style"
+// exactly: *bold*, _italic_, __underline__, ~strikethrough~, ||spoiler||,
+// `code`, ```pre```, [link](url), ![emoji](tg://emoji?id=…),
+// ![time](tg://time?unix=…&format=…), > blockquote, and **> expandable
+// blockquote.
 type MarkdownParser struct{}
 
 // NewMarkdownParser returns a new MarkdownParser ready for use.
@@ -20,14 +26,44 @@ func NewMarkdownParser() *MarkdownParser {
 // Parse converts MarkdownV2-formatted text to HTML and delegates to HTMLParser.
 // It returns the plain text and corresponding Telegram message entities.
 func (p *MarkdownParser) Parse(md string) (string, []tl.MessageEntityClass, error) {
-	html := mdToHTML(md)
+	html := mdToHTML(md, false)
+	return htmlParser.Parse(html)
+}
+
+// LegacyMarkdownParser parses the legacy Bot API "Markdown style" (parse_mode
+// Markdown): *bold*, _italic_, `code`, ```pre```, and [link](url). Underline,
+// strikethrough, spoiler, blockquote, custom emoji, and date-time entities do
+// not exist in this mode by specification.
+type LegacyMarkdownParser struct{}
+
+// NewLegacyMarkdownParser returns a new LegacyMarkdownParser ready for use.
+func NewLegacyMarkdownParser() *LegacyMarkdownParser {
+	return &LegacyMarkdownParser{}
+}
+
+// Parse converts legacy Markdown-formatted text to HTML and delegates to
+// HTMLParser.
+func (p *LegacyMarkdownParser) Parse(md string) (string, []tl.MessageEntityClass, error) {
+	html := mdToHTML(md, true)
 	return htmlParser.Parse(html)
 }
 
 // linkRe matches MarkdownV2 [text](url) links.
 var linkRe = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
 
-func mdToHTML(md string) string {
+// imageLinkRe matches MarkdownV2 ![alt](url) syntax used for custom emoji and
+// date-time entities.
+var imageLinkRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+
+// emojiLinkRe parses tg://emoji?id=… URLs inside image links.
+var emojiLinkRe = regexp.MustCompile(`^tg://emoji\?id=(-?\d+)$`)
+
+// timeLinkRe parses tg://time?unix=…&format=… URLs inside image links.
+var timeLinkRe = regexp.MustCompile(`^tg://time\?unix=(\d+)(?:&format=([^&]*))?$`)
+
+// mdToHTML converts MarkdownV2 (or legacy Markdown when legacy is true) to the
+// HTML subset understood by HTMLParser.
+func mdToHTML(md string, legacy bool) string {
 	s := md
 
 	// 1a. Pre-escape: handle \\ and \` before code extraction.
@@ -45,30 +81,48 @@ func mdToHTML(md string) string {
 
 	// 1b. Post-escape: handle remaining escape sequences. These run after
 	//     code extraction so that \* inside `code` is preserved literally.
-	s = escapePost(s)
+	s = escapePost(s, legacy)
 
-	// 3. Blockquotes — > and >>> at line start. Must run after code extraction
-	//    (so > inside code is protected) and before inline formatting (so **bold**
-	//    inside a blockquote is still processed).
-	s = processBlockquotes(s)
+	if !legacy {
+		// 3. Blockquotes — **>, >>> and > at line start. Must run after code
+		//    extraction (so > inside code is protected) and before inline
+		//    formatting (so that the ** of an expandable quote is not
+		//    consumed as a bold delimiter).
+		s = processBlockquotes(s)
 
-	// 4. Links [text](url) — run before formatting delimiters so that ** inside
+		// 4. Image links ![alt](url) — custom emoji and date-time entities.
+		//    Run before plain links and formatting delimiters.
+		s = replaceImageLinks(s)
+	}
+
+	// 5. Links [text](url) — run before formatting delimiters so that * inside
 	//    [text] sections is not prematurely consumed.
 	s = replaceLinks(s)
 
-	// 5. Formatting delimiters — longer delimiters first to avoid partial
-	//    consumption (e.g. "**" before "*").
-	s = replaceDelimited(s, "**", "<b>", "</b>")              // bold
-	s = replaceDelimited(s, "__", "<u>", "</u>")              // underline (MarkdownV2)
-	s = replaceDelimited(s, "~~", "<s>", "</s>")              // strikethrough
-	s = replaceDelimited(s, "||", "<spoiler>", "</spoiler>") // spoiler
-	s = replaceDelimited(s, "*", "<i>", "</i>")               // italic
-	s = replaceDelimited(s, "_", "<i>", "</i>")               // italic (alternative)
+	if legacy {
+		// Legacy Markdown style: *bold*, _italic_ only. Doubled delimiters
+		// are not entities in this mode — keep them literal instead of
+		// producing empty delimiter pairs.
+		s = strings.ReplaceAll(s, "__", "\uE020")
+		s = strings.ReplaceAll(s, "**", "\uE021")
+		s = replaceDelimited(s, "*", "<b>", "</b>")
+		s = replaceDelimited(s, "_", "<i>", "</i>")
+		s = strings.ReplaceAll(s, "\uE020", "__")
+		s = strings.ReplaceAll(s, "\uE021", "**")
+	} else {
+		// 6. Formatting delimiters per the official MarkdownV2 style. Longer
+		//    delimiters first (__ before _) so that underline wins over italic.
+		s = replaceDelimited(s, "__", "<u>", "</u>")             // underline
+		s = replaceDelimited(s, "||", "<spoiler>", "</spoiler>") // spoiler
+		s = replaceDelimited(s, "*", "<b>", "</b>")              // bold
+		s = replaceDelimited(s, "_", "<i>", "</i>")              // italic
+		s = replaceDelimited(s, "~", "<s>", "</s>")              // strikethrough
+	}
 
-	// 6. Restore code spans from placeholders.
+	// 7. Restore code spans from placeholders.
 	s = restoreCodeBlocks(s, codeBlocks)
 
-	// 7. Restore escaped characters, HTML-escaping <, >, and & so the
+	// 8. Restore escaped characters, HTML-escaping <, >, and & so the
 	//    HTML parser treats them as literal text. Handles both pre-escape
 	//    and post-escape placeholders.
 	s = unescapeAll(s)
@@ -182,25 +236,99 @@ func replaceLinks(s string) string {
 	})
 }
 
+// replaceImageLinks converts the MarkdownV2 image-link syntax
+// ![alt](tg://emoji?id=…) and ![alt](tg://time?unix=…&format=…) into the
+// equivalent HTML tags. Other image URLs have no Bot API meaning and are left
+// as literal text.
+func replaceImageLinks(s string) string {
+	return imageLinkRe.ReplaceAllStringFunc(s, func(match string) string {
+		parts := imageLinkRe.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		alt, url := parts[1], parts[2]
+		if m := emojiLinkRe.FindStringSubmatch(url); m != nil {
+			return `<tg-emoji emoji-id="` + m[1] + `">` + alt + `</tg-emoji>`
+		}
+		if m := timeLinkRe.FindStringSubmatch(url); m != nil {
+			if m[2] != "" {
+				return `<tg-time unix="` + m[1] + `" format="` + m[2] + `">` + alt + `</tg-time>`
+			}
+			return `<tg-time unix="` + m[1] + `">` + alt + `</tg-time>`
+		}
+		return match
+	})
+}
+
 // processBlockquotes converts MarkdownV2 line-prefix blockquote syntax to
-// HTML <blockquote> tags. > at line start creates a plain blockquote;
-// >>> creates an expandable blockquote. An optional space may follow the
-// prefix. Lines without a prefix are passed through unchanged.
+// HTML <blockquote> tags. Consecutive quoted lines merge into a single
+// blockquote entity, matching the documented multi-line examples:
+//
+//	>Block quotation started
+//	>Block quotation continued
+//
+// **> at line start begins an expandable blockquote (the official syntax —
+// the empty bold entity is the separator that keeps an expandable quote from
+// merging into a preceding plain quote); subsequent > lines continue it.
+// >>> is accepted as an mtgo extension for the same effect.
 //
 // Must run after code extraction so that > inside code spans is already
 // placeholder-protected.
 func processBlockquotes(s string) string {
 	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		if trimmed, ok := strings.CutPrefix(line, ">>>"); ok {
-			trimmed = strings.TrimPrefix(trimmed, " ")
-			lines[i] = "<blockquote expandable>" + trimmed + "</blockquote>"
-		} else if trimmed, ok := strings.CutPrefix(line, ">"); ok {
-			trimmed = strings.TrimPrefix(trimmed, " ")
-			lines[i] = "<blockquote>" + trimmed + "</blockquote>"
+	out := make([]string, 0, len(lines))
+	var b strings.Builder
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		content, kind := quoteLine(line)
+		if kind == quoteNone {
+			out = append(out, line)
+			continue
+		}
+		expandable := kind == quoteExpandable
+		b.Reset()
+		b.WriteString(content)
+		// Plain runs continue only while plain-quote lines follow; an
+		// expandable run absorbs any following quoted lines.
+		for i+1 < len(lines) {
+			next, nextKind := quoteLine(lines[i+1])
+			if nextKind == quoteNone || (!expandable && nextKind == quoteExpandable) {
+				break
+			}
+			b.WriteByte('\n')
+			b.WriteString(next)
+			i++
+		}
+		if expandable {
+			out = append(out, "<blockquote expandable>"+b.String()+"</blockquote>")
+		} else {
+			out = append(out, "<blockquote>"+b.String()+"</blockquote>")
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(out, "\n")
+}
+
+type quoteKind int
+
+const (
+	quoteNone quoteKind = iota
+	quotePlain
+	quoteExpandable
+)
+
+// quoteLine classifies a blockquote line and returns its content with the
+// prefix (and one optional following space) stripped.
+func quoteLine(line string) (string, quoteKind) {
+	if trimmed, ok := strings.CutPrefix(line, "**>"); ok {
+		return strings.TrimPrefix(trimmed, " "), quoteExpandable
+	}
+	if trimmed, ok := strings.CutPrefix(line, ">>>"); ok {
+		return strings.TrimPrefix(trimmed, " "), quoteExpandable
+	}
+	if trimmed, ok := strings.CutPrefix(line, ">"); ok {
+		return strings.TrimPrefix(trimmed, " "), quotePlain
+	}
+	return line, quoteNone
 }
 
 // replaceDelimited performs a blind state-machine replacement: it alternates
@@ -229,14 +357,14 @@ func replaceDelimited(s, delim, openTag, closeTag string) string {
 	return b.String()
 }
 
-// MarkdownV2 escape sequences. Each backslash-character sequence is
-// replaced with a Unicode private-use placeholder during the initial
-// pass, then restored to its literal character after all formatting.
+// Escape sequences. Each backslash-character sequence is replaced with a
+// Unicode private-use placeholder during the initial pass, then restored to
+// its literal character after all formatting.
 //
 // Split into two groups:
 //   - preEscapes: \\ and \` — processed before code extraction because
 //     they affect code boundary detection.
-//   - postEscapes: remaining 16 sequences — processed after code
+//   - postEscapes: the remaining sequences — processed after code
 //     extraction so that escapes inside code spans are preserved literally.
 //
 // Within each group \\ is ordered first so that the backslash in \\X is
@@ -250,6 +378,9 @@ var preEscapes = []struct {
 	{"\\`", "\uE003", "`"},
 }
 
+// postEscapes covers every MarkdownV2 special character that must be escapable
+// outside entities: '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+',
+// '-', '=', '|', '{', '}', '.', '!'.
 var postEscapes = []struct {
 	escaped     string
 	placeholder string
@@ -275,8 +406,20 @@ var postEscapes = []struct {
 	{`\#`, "\uE013", `#`},
 }
 
-// allEscapes is the concatenation of preEscapes and postEscapes, used
-// by unescapeAll to restore all placeholders in a single pass.
+// legacyPostEscapes covers the four characters escapable in the legacy
+// Markdown style: '_', '*', '`' (handled pre-extraction), and '['.
+var legacyPostEscapes = []struct {
+	escaped     string
+	placeholder string
+	literal     string
+}{
+	{`\*`, "\uE001", `*`},
+	{`\_`, "\uE002", `_`},
+	{`\[`, "\uE006", `[`},
+}
+
+// allEscapes is the concatenation of preEscapes and postEscapes (all variants),
+// used by unescapeAll to restore all placeholders in a single pass.
 var allEscapes []struct {
 	placeholder string
 	literal     string
@@ -286,7 +429,7 @@ func init() {
 	allEscapes = make([]struct {
 		placeholder string
 		literal     string
-	}, len(preEscapes)+len(postEscapes))
+	}, len(preEscapes)+len(postEscapes)+len(legacyPostEscapes))
 	i := 0
 	for _, p := range preEscapes {
 		allEscapes[i] = struct {
@@ -296,6 +439,13 @@ func init() {
 		i++
 	}
 	for _, p := range postEscapes {
+		allEscapes[i] = struct {
+			placeholder string
+			literal     string
+		}{p.placeholder, p.literal}
+		i++
+	}
+	for _, p := range legacyPostEscapes {
 		allEscapes[i] = struct {
 			placeholder string
 			literal     string
@@ -314,11 +464,15 @@ func escapePre(s string) string {
 	return s
 }
 
-func escapePost(s string) string {
+func escapePost(s string, legacy bool) string {
 	if !strings.Contains(s, `\`) {
 		return s
 	}
-	for _, p := range postEscapes {
+	escapes := postEscapes
+	if legacy {
+		escapes = legacyPostEscapes
+	}
+	for _, p := range escapes {
 		s = strings.ReplaceAll(s, p.escaped, p.placeholder)
 	}
 	return s
@@ -334,3 +488,37 @@ func unescapeAll(s string) string {
 	}
 	return s
 }
+
+// parseDateTimeFormat validates and converts a Bot API date-time format string
+// (regex r|w?[dD]?[tT]?) into the messageEntityFormattedDate flag fields.
+// Returns ok=false for malformed format strings.
+func parseDateTimeFormat(format string) (relative, shortTime, longTime, shortDate, longDate, dayOfWeek bool, ok bool) {
+	if format == "" {
+		return false, false, false, false, false, false, true
+	}
+	if strings.EqualFold(format, "r") {
+		return true, false, false, false, false, false, true
+	}
+	rest := format
+	if len(rest) > 0 && (rest[0] == 'w' || rest[0] == 'W') {
+		dayOfWeek = true
+		rest = rest[1:]
+	}
+	if len(rest) > 0 && (rest[0] == 'd' || rest[0] == 'D') {
+		longDate = rest[0] == 'D'
+		shortDate = rest[0] == 'd'
+		rest = rest[1:]
+	}
+	if len(rest) > 0 && (rest[0] == 't' || rest[0] == 'T') {
+		longTime = rest[0] == 'T'
+		shortTime = rest[0] == 't'
+		rest = rest[1:]
+	}
+	if rest != "" {
+		return false, false, false, false, false, false, false
+	}
+	return relative, shortTime, longTime, shortDate, longDate, dayOfWeek, true
+}
+
+// unixTimeRE validates the tg-time unix attribute.
+var unixTimeRE = regexp.MustCompile(`^\d+$`)
