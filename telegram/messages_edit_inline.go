@@ -2,7 +2,9 @@ package telegram
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/mtgo-labs/mtgo/telegram/params"
 	"github.com/mtgo-labs/mtgo/tg"
 )
 
@@ -17,6 +19,18 @@ func (c *Client) EditInlineText(ctx context.Context, inlineMessageID tg.InputBot
 	c.Log.Debugf("EditInlineText")
 	opt := getEditInlineOpts(opts...)
 
+	// Parse formatted text when no pre-built entities are provided.
+	sendText := text
+	var parsedEntities []tg.MessageEntityClass
+	if len(opt.Entities) == 0 {
+		parsed, entities, err := c.parseText(text, opt.ParseMode)
+		if err != nil {
+			return false, fmt.Errorf("parse text: %w", err)
+		}
+		sendText = parsed
+		parsedEntities = entities
+	}
+
 	var flags tg.Fields
 	if opt.NoWebpage {
 		flags.Set(1)
@@ -30,8 +44,15 @@ func (c *Client) EditInlineText(ctx context.Context, inlineMessageID tg.InputBot
 	if opt.ReplyMarkup != nil {
 		flags.Set(2)
 	}
-	if len(opt.Entities) > 0 {
+	entities := opt.Entities
+	if len(entities) == 0 {
+		entities = parsedEntities
+	}
+	if len(entities) > 0 {
 		flags.Set(3)
+	}
+	if opt.RichMessage != nil {
+		flags.Set(23)
 	}
 
 	req := &tg.MessagesEditInlineBotMessageRequest{
@@ -39,9 +60,12 @@ func (c *Client) EditInlineText(ctx context.Context, inlineMessageID tg.InputBot
 		NoWebpage:   opt.NoWebpage,
 		InvertMedia: opt.InvertMedia,
 		ID:          inlineMessageID,
-		Message:     text,
+		Message:     sendText,
 		ReplyMarkup: opt.ReplyMarkup,
-		Entities:    opt.Entities,
+		Entities:    entities,
+	}
+	if opt.RichMessage != nil {
+		req.RichMessage = opt.RichMessage
 	}
 
 	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
@@ -64,6 +88,18 @@ func (c *Client) EditInlineCaption(ctx context.Context, inlineMessageID tg.Input
 	c.Log.Debugf("EditInlineCaption")
 	opt := getEditInlineOpts(opts...)
 
+	// Parse formatted caption when no pre-built entities are provided.
+	sendCaption := caption
+	var parsedEntities []tg.MessageEntityClass
+	if len(opt.Entities) == 0 {
+		parsed, entities, err := c.parseText(caption, opt.ParseMode)
+		if err != nil {
+			return false, fmt.Errorf("parse caption: %w", err)
+		}
+		sendCaption = parsed
+		parsedEntities = entities
+	}
+
 	var flags tg.Fields
 	flags.Set(11)
 	if opt.InvertMedia {
@@ -72,13 +108,27 @@ func (c *Client) EditInlineCaption(ctx context.Context, inlineMessageID tg.Input
 	if opt.ReplyMarkup != nil {
 		flags.Set(2)
 	}
+	entities := opt.Entities
+	if len(entities) == 0 {
+		entities = parsedEntities
+	}
+	if len(entities) > 0 {
+		flags.Set(3)
+	}
+	if opt.RichMessage != nil {
+		flags.Set(23)
+	}
 
 	req := &tg.MessagesEditInlineBotMessageRequest{
 		Flags:       flags,
 		InvertMedia: opt.InvertMedia,
 		ID:          inlineMessageID,
-		Message:     caption,
+		Message:     sendCaption,
 		ReplyMarkup: opt.ReplyMarkup,
+		Entities:    entities,
+	}
+	if opt.RichMessage != nil {
+		req.RichMessage = opt.RichMessage
 	}
 
 	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
@@ -159,6 +209,44 @@ func (c *Client) EditInlineReplyMarkup(ctx context.Context, inlineMessageID tg.I
 	return result, nil
 }
 
+// EditInlineRichMessage replaces the content of an inline message with a rich
+// message (Bot API 10.1 InputRichMessageContent editing).
+//
+// Example:
+//
+//	ok, err := client.EditInlineRichMessage(ctx, inlineMsgID,
+//		telegram.RichMessageMarkdown("**updated**", false))
+func (c *Client) EditInlineRichMessage(ctx context.Context, inlineMessageID tg.InputBotInlineMessageIDClass, rm tg.InputRichMessageClass, opts ...*EditInlineOpts) (bool, error) {
+	c.Log.Debugf("EditInlineRichMessage")
+	if rm == nil {
+		return false, fmt.Errorf("edit inline rich message: rich message is nil")
+	}
+	opt := getEditInlineOpts(opts...)
+
+	var flags tg.Fields
+	flags.Set(23)
+	if opt.ReplyMarkup != nil {
+		flags.Set(2)
+	}
+
+	req := &tg.MessagesEditInlineBotMessageRequest{
+		Flags:       flags,
+		ID:          inlineMessageID,
+		ReplyMarkup: opt.ReplyMarkup,
+		RichMessage: rm,
+	}
+
+	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
+	if err != nil {
+		return false, err
+	}
+	result, err := rpc.MessagesEditInlineBotMessage(ctx, req)
+	if err != nil {
+		return false, err
+	}
+	return result, nil
+}
+
 // EditInlineOpts provides optional parameters for inline message editing operations.
 //
 // Example:
@@ -174,6 +262,11 @@ type EditInlineOpts struct {
 	InvertMedia bool
 	ReplyMarkup tg.ReplyMarkupClass
 	Entities    []tg.MessageEntityClass
+	// ParseMode parses the text/caption into entities when Entities is empty.
+	ParseMode params.ParseMode
+	// RichMessage replaces the inline message content with a rich message
+	// (flag 23).
+	RichMessage tg.InputRichMessageClass
 }
 
 func getEditInlineOpts(opts ...*EditInlineOpts) *EditInlineOpts {

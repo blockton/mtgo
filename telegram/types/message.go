@@ -64,6 +64,9 @@ type Message struct {
 	ReplyToPollOptionID string
 	// Media holds the parsed media attachment, or nil for text-only messages.
 	Media Media
+	// RichMessage is the rendered rich message content (Bot API 10.1), or nil
+	// for plain messages. Raw holds the underlying tg.Message for block access.
+	RichMessage *tg.RichMessage
 	// Entities contains formatting and special entity markers (mentions, URLs,
 	// bold, etc.) found in Text.
 	Entities []*MessageEntity
@@ -550,6 +553,9 @@ func parseRegularMessage(raw *tg.Message, pm *PeerMap) *Message {
 		if raw.Message != "" {
 			m.Caption = raw.Message
 		}
+	}
+	if raw.RichMessage != nil {
+		m.RichMessage = raw.RichMessage
 	}
 	if raw.Entities != nil {
 		var users map[int64]*tg.User
@@ -1476,6 +1482,22 @@ func (m *Message) Answer(text string, opts ...*params.SendMessage) (*Message, er
 		return nil, ErrNoBinder
 	}
 	return m.binder.BoundSend(m.ChatID, text, 0, opts...)
+}
+
+// ReplyRich sends a rich message replying to this message.
+func (m *Message) ReplyRich(rm tg.InputRichMessageClass, opts ...*params.SendMessage) (*Message, error) {
+	if m.binder == nil {
+		return nil, ErrNoBinder
+	}
+	return m.binder.BoundSendRich(m.ChatID, rm, m.ID, opts...)
+}
+
+// AnswerRich sends a rich message in the same chat without replying.
+func (m *Message) AnswerRich(rm tg.InputRichMessageClass, opts ...*params.SendMessage) (*Message, error) {
+	if m.binder == nil {
+		return nil, ErrNoBinder
+	}
+	return m.binder.BoundSendRich(m.ChatID, rm, 0, opts...)
 }
 
 func (m *Message) AnswerAnimation(file *InputFile, caption string, opts ...*params.SendAnimation) (*Message, error) {

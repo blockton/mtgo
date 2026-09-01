@@ -218,6 +218,20 @@ func (c *CallbackQuery) EditReplyMarkup(markup tg.ReplyMarkupClass) (*Message, e
 	return msg, err
 }
 
+// EditRich replaces the originating message content with a rich message. Works
+// for both inline messages (InlineMessageID set) and regular chat messages.
+func (c *CallbackQuery) EditRich(rm tg.InputRichMessageClass) (*Message, bool, error) {
+	if c.binder == nil {
+		return nil, false, ErrNoBinder
+	}
+	if c.InlineMessageID != nil {
+		ok, err := c.binder.BoundEditInlineRich(c.InlineMessageID, rm)
+		return nil, ok, err
+	}
+	msg, err := c.binder.BoundEditRich(c.ChatID, c.MessageID, rm)
+	return msg, false, err
+}
+
 // Delete removes the message that originated this callback query.
 func (c *CallbackQuery) Delete() (int, error) {
 	if c.binder == nil {
@@ -263,7 +277,18 @@ func (iq *InlineQuery) Answer(results []tg.InputBotInlineResultClass, opts ...*p
 }
 
 func (iq *InlineQuery) AnswerResults(results []InlineResultBuilder, opts ...*params.InlineQuery) error {
-	return iq.Answer(buildInlineResults(results), opts...)
+	tlResults, err := buildInlineResults(results)
+	if err != nil {
+		return err
+	}
+	return iq.Answer(tlResults, opts...)
+}
+
+// AnswerResult answers the query with a single builder-produced result. Any
+// InlineResultBuilder works: InlineArticle, InlinePhoto, InlineLocation,
+// InlineRich, and so on.
+func (iq *InlineQuery) AnswerResult(result InlineResultBuilder, opts ...*params.InlineQuery) error {
+	return iq.AnswerResults([]InlineResultBuilder{result}, opts...)
 }
 
 func (iq *InlineQuery) AnswerArticle(id, title, text string, opts ...*params.InlineQuery) error {

@@ -26,8 +26,11 @@ const (
 	// explicit mode is sent to the API).
 	ParseModeDefault ParseMode = "default"
 
-	// ParseModeMarkdown interprets message text as Markdown-formatted
-	// content (legacy mode).
+	// ParseModeMarkdown interprets message text with the legacy Bot API
+	// "Markdown" style: *bold*, _italic_, `code`, ```pre```, and
+	// [link](url). Underline, strikethrough, spoiler, blockquote, custom
+	// emoji, and date-time entities are not supported in this mode; use
+	// MarkdownV2 for them.
 	ParseModeMarkdown ParseMode = "markdown"
 
 	// ParseModeHTML interprets message text as HTML-formatted content.
@@ -37,11 +40,15 @@ const (
 	// verbatim without any formatting applied.
 	ParseModeDisabled ParseMode = "disabled"
 
-	// Markdown is a shorthand for ParseModeMarkdown.
+	// Markdown is a shorthand for ParseModeMarkdown (legacy style).
 	Markdown ParseMode = "markdown"
 	// HTML is a shorthand for ParseModeHTML.
 	HTML ParseMode = "html"
-	// MarkdownV2 interprets message text as MarkdownV2-formatted content.
+	// MarkdownV2 interprets message text with the official Bot API
+	// "MarkdownV2" style: *bold*, _italic_, __underline__, ~strikethrough~,
+	// ||spoiler||, `code`, ```pre```, [link](url),
+	// ![emoji](tg://emoji?id=…), ![time](tg://time?unix=…&format=…), and
+	// > blockquotes (**> for expandable).
 	MarkdownV2 ParseMode = "MarkdownV2"
 	// Disabled is a shorthand for ParseModeDisabled.
 	Disabled ParseMode = "disabled"
@@ -110,6 +117,9 @@ type SendMessage struct {
 	MessageThreadID       int32
 	DirectMessagesTopicID int64
 	ProtectContent        bool
+	// RichMessage attaches a rich message (Bot API sendRichMessage). When set,
+	// it is sent alongside an empty plain-text body and rendered in place of it.
+	RichMessage tl.InputRichMessageClass
 }
 
 // EditMessage holds all configurable options for the edit-message Telegram
@@ -131,6 +141,9 @@ type EditMessage struct {
 	ScheduleDate          *int32
 	ShowCaptionAboveMedia bool
 	BusinessConnectionID  string
+	// RichMessage replaces the message text with a rich message (Bot API 10.1
+	// editMessageText rich_message parameter).
+	RichMessage tl.InputRichMessageClass
 }
 
 // ForwardMessages holds all configurable options for the forward-messages
@@ -939,12 +952,13 @@ type SendPhoto struct {
 	ViewOnce              bool
 	ShowCaptionAboveMedia bool
 
-	BusinessConnectionID  string
-	AllowPaidBroadcast    bool
-	PaidMessageStarCount  *int64
-	MessageThreadID       int32
-	RepeatPeriod          *int32
+	BusinessConnectionID string
+	AllowPaidBroadcast   bool
+	PaidMessageStarCount *int64
+	MessageThreadID      int32
+	RepeatPeriod         *int32
 }
+
 func (s *SendPhoto) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
 	return s.ParseMode, s.CaptionEntities
 }
@@ -992,12 +1006,13 @@ type SendAnimation struct {
 	Unsave                bool
 	ShowCaptionAboveMedia bool
 
-	BusinessConnectionID  string
-	AllowPaidBroadcast    bool
-	PaidMessageStarCount  *int64
-	MessageThreadID       int32
-	RepeatPeriod          *int32
+	BusinessConnectionID string
+	AllowPaidBroadcast   bool
+	PaidMessageStarCount *int64
+	MessageThreadID      int32
+	RepeatPeriod         *int32
 }
+
 func (s *SendAnimation) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
 	return s.ParseMode, s.CaptionEntities
 }
@@ -1038,12 +1053,13 @@ type SendVoice struct {
 	ViewOnce              bool
 	ShowCaptionAboveMedia bool
 
-	BusinessConnectionID  string
-	AllowPaidBroadcast    bool
-	PaidMessageStarCount  *int64
-	MessageThreadID       int32
-	RepeatPeriod          *int32
+	BusinessConnectionID string
+	AllowPaidBroadcast   bool
+	PaidMessageStarCount *int64
+	MessageThreadID      int32
+	RepeatPeriod         *int32
 }
+
 func (s *SendVoice) getParseModeAndEntities() (ParseMode, []tl.MessageEntityClass) {
 	return s.ParseMode, s.CaptionEntities
 }
