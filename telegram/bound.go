@@ -31,6 +31,18 @@ func (c *Client) BoundSend(chatID int64, text string, replyTo int32, opts ...*pa
 	return c.SendMessage(ctx, chatID, text, opt)
 }
 
+// BoundSendRich sends a rich message to the given chat, optionally replying to
+// another message identified by replyTo. Bound-method convenience wrapper
+// around [Client.SendRichMessage].
+func (c *Client) BoundSendRich(chatID int64, rm tg.InputRichMessageClass, replyTo int32, opts ...*params.SendMessage) (*types.Message, error) {
+	ctx := context.Background()
+	opt := params.GetOptDef(&params.SendMessage{ReplyToMessageID: replyTo}, opts...)
+	if opt.ReplyToMessageID == 0 {
+		opt.ReplyToMessageID = replyTo
+	}
+	return c.SendRichMessage(ctx, chatID, rm, opt)
+}
+
 // BoundSendMedia sends a media attachment to the specified chat with an optional
 // caption. This is a bound-method convenience wrapper that creates a background
 // context and delegates to [Client.SendMedia].
@@ -156,12 +168,12 @@ func (c *Client) BoundEditReplyMarkup(chatID int64, msgID int32, markup tg.Reply
 
 func (c *Client) BoundEditInline(inlineMessageID tg.InputBotInlineMessageIDClass, text string, opts ...*params.EditMessage) (bool, error) {
 	ctx := context.Background()
-	return c.EditInlineText(ctx, inlineMessageID, text)
+	return c.EditInlineText(ctx, inlineMessageID, text, editInlineOptsFromParams(opts...)...)
 }
 
 func (c *Client) BoundEditInlineCaption(inlineMessageID tg.InputBotInlineMessageIDClass, caption string, opts ...*params.EditMessage) (bool, error) {
 	ctx := context.Background()
-	return c.EditInlineCaption(ctx, inlineMessageID, caption)
+	return c.EditInlineCaption(ctx, inlineMessageID, caption, editInlineOptsFromParams(opts...)...)
 }
 
 func (c *Client) BoundEditInlineMedia(inlineMessageID tg.InputBotInlineMessageIDClass, media tg.InputMediaClass) (bool, error) {
@@ -172,6 +184,34 @@ func (c *Client) BoundEditInlineMedia(inlineMessageID tg.InputBotInlineMessageID
 func (c *Client) BoundEditInlineReplyMarkup(inlineMessageID tg.InputBotInlineMessageIDClass, markup tg.ReplyMarkupClass) (bool, error) {
 	ctx := context.Background()
 	return c.EditInlineReplyMarkup(ctx, inlineMessageID, markup)
+}
+
+func (c *Client) BoundEditInlineRich(inlineMessageID tg.InputBotInlineMessageIDClass, rm tg.InputRichMessageClass) (bool, error) {
+	ctx := context.Background()
+	return c.EditInlineRichMessage(ctx, inlineMessageID, rm)
+}
+
+func (c *Client) BoundEditRich(chatID int64, msgID int32, rm tg.InputRichMessageClass) (*types.Message, error) {
+	ctx := context.Background()
+	return c.EditMessageText(ctx, chatID, msgID, "", &params.EditMessage{RichMessage: rm})
+}
+
+// editInlineOptsFromParams converts params.EditMessage options into
+// EditInlineOpts so bound inline edits honor parse mode, entities, markup, and
+// rich message settings.
+func editInlineOptsFromParams(opts ...*params.EditMessage) []*EditInlineOpts {
+	if len(opts) == 0 || opts[0] == nil {
+		return nil
+	}
+	p := opts[0]
+	return []*EditInlineOpts{{
+		NoWebpage:   p.DisableWebPagePreview,
+		InvertMedia: p.InvertMedia,
+		ReplyMarkup: p.ReplyMarkup,
+		Entities:    p.Entities,
+		ParseMode:   p.ParseMode,
+		RichMessage: p.RichMessage,
+	}}
 }
 
 // BoundDelete deletes one or more messages from the specified chat. This is a

@@ -173,7 +173,7 @@ func TestHTMLParser_Nested(t *testing.T) {
 
 func TestMarkdownParser_Bold(t *testing.T) {
 	p := NewMarkdownParser()
-	text, entities, err := p.Parse("**hello**")
+	text, entities, err := p.Parse("*hello*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestMarkdownParser_Bold(t *testing.T) {
 
 func TestMarkdownParser_Italic(t *testing.T) {
 	p := NewMarkdownParser()
-	text, _, err := p.Parse("*world*")
+	text, _, err := p.Parse("_world_")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ func TestMarkdownParser_Underline(t *testing.T) {
 
 func TestMarkdownParser_Strikethrough(t *testing.T) {
 	p := NewMarkdownParser()
-	text, entities, err := p.Parse("~~struck~~")
+	text, entities, err := p.Parse("~struck~")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,8 +562,8 @@ func TestMarkdownParser_Spoiler(t *testing.T) {
 
 func TestMarkdownParser_CodeInsideBold(t *testing.T) {
 	p := NewMarkdownParser()
-	// **`code`** should produce bold containing a code span
-	text, entities, err := p.Parse("**`code`**")
+	// *`code`* should produce bold containing a code span
+	text, entities, err := p.Parse("*`code`*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestMarkdownParser_EscapeBackslash(t *testing.T) {
 
 func TestMarkdownParser_EscapeMixed(t *testing.T) {
 	p := NewMarkdownParser()
-	text, entities, err := p.Parse(`\*escaped\* **real bold**`)
+	text, entities, err := p.Parse(`\*escaped\* *real bold*`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,7 +683,7 @@ func TestMarkdownParser_EscapeAngleBrackets(t *testing.T) {
 
 func TestMarkdownParser_NestedBoldItalic(t *testing.T) {
 	p := NewMarkdownParser()
-	text, entities, err := p.Parse("**bold *italic* bold**")
+	text, entities, err := p.Parse("*bold _italic_ bold*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -700,7 +700,7 @@ func TestMarkdownParser_NestedBoldItalic(t *testing.T) {
 func TestMarkdownParser_Complex(t *testing.T) {
 	p := NewMarkdownParser()
 	text, entities, err := p.Parse(
-		`**bold** __underline__ ~~strike~~ ||spoiler|| ` + "`code`" + ` [link](https://t.me)`,
+		`*bold* __underline__ ~strike~ ||spoiler|| ` + "`code`" + ` [link](https://t.me)`,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -797,7 +797,7 @@ func TestMarkdownParser_ExpandableBlockquoteNoSpace(t *testing.T) {
 
 func TestMarkdownParser_BlockquoteWithFormatting(t *testing.T) {
 	p := NewMarkdownParser()
-	text, entities, err := p.Parse("> **bold** and *italic*")
+	text, entities, err := p.Parse("> *bold* and _italic_")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -825,12 +825,16 @@ func TestMarkdownParser_BlockquoteMultiLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Each line is a separate blockquote with a newline between them
+	// Consecutive quoted lines merge into a single blockquote entity
+	// (official MarkdownV2 multi-line blockquote semantics).
 	if text != "line one\nline two" {
 		t.Errorf("text = %q", text)
 	}
-	if len(entities) < 2 {
-		t.Fatalf("entities = %d, want >= 2", len(entities))
+	if len(entities) != 1 {
+		t.Fatalf("entities = %d, want 1 merged blockquote", len(entities))
+	}
+	if q, ok := entities[0].(*tl.MessageEntityBlockquote); !ok || q.Length != int32(len("line one\nline two")) {
+		t.Fatalf("blockquote entity = %#v", entities[0])
 	}
 }
 

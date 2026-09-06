@@ -20,11 +20,18 @@ func (c *Context) AnswerInlineResults(results []types.InlineResultBuilder, opts 
 	if c.InlineQuery == nil {
 		return nil
 	}
-	tlResults := make([]tg.InputBotInlineResultClass, len(results))
-	for i, r := range results {
-		tlResults[i] = r.TL()
+	tlResults, err := types.BuildInlineResults(results)
+	if err != nil {
+		return err
 	}
 	return c.Client.AnswerInlineQuery(c.Ctx, c.InlineQuery.ID, tlResults, opts...)
+}
+
+// AnswerInlineResult answers the inline query with a single builder-produced
+// result. Any types.InlineResultBuilder works: InlineArticle, InlinePhoto,
+// InlineLocation, InlineVenue, InlineContact, InlineRich, InlineGame.
+func (c *Context) AnswerInlineResult(result types.InlineResultBuilder, opts ...*AnswerInlineQueryOption) error {
+	return c.AnswerInlineResults([]types.InlineResultBuilder{result}, opts...)
 }
 
 func (c *Context) AnswerInlineArticle(id, title, text string, opts ...*AnswerInlineQueryOption) error {

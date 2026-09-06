@@ -61,6 +61,23 @@ func (m *mockBinder) BoundEditInline(inlineMessageID tl.InputBotInlineMessageIDC
 	return true, nil
 }
 
+func (m *mockBinder) BoundSendRich(chatID int64, rm tl.InputRichMessageClass, replyTo int32, opts ...*params.SendMessage) (*Message, error) {
+	m.sendChatID = chatID
+	m.sendReplyTo = replyTo
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &Message{ID: 1, ChatID: chatID, RichMessage: nil}, nil
+}
+
+func (m *mockBinder) BoundEditRich(chatID int64, msgID int32, rm tl.InputRichMessageClass) (*Message, error) {
+	return nil, nil
+}
+
+func (m *mockBinder) BoundEditInlineRich(inlineMessageID tl.InputBotInlineMessageIDClass, rm tl.InputRichMessageClass) (bool, error) {
+	return true, nil
+}
+
 func (m *mockBinder) BoundEditCaption(chatID int64, msgID int32, caption string, opts ...*params.EditMessage) (*Message, error) {
 	return nil, nil
 }

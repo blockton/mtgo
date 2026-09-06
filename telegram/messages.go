@@ -19,8 +19,12 @@ func toParserMode(mode params.ParseMode) (parser.ParseMode, bool, error) {
 	switch normalized {
 	case "html":
 		return parser.ParseModeHTML, true, nil
-	case "markdown", "markdownv2":
+	case "markdownv2":
 		return parser.ParseModeMarkdown, true, nil
+	case "markdown":
+		// Bot API parse_mode "Markdown" is the legacy style (*bold*,
+		// _italic_, code, pre, links only).
+		return parser.ParseModeLegacyMarkdown, true, nil
 	case "", "default", "disabled":
 		return parser.ParseModeDefault, false, nil
 	default:
@@ -173,6 +177,9 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, opt
 	if opt.SendAs != nil {
 		flags |= (1 << 13)
 	}
+	if opt.RichMessage != nil {
+		flags.Set(23)
+	}
 
 	req := &tg.MessagesSendMessageRequest{
 		Flags:       flags,
@@ -196,6 +203,9 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, opt
 	}
 	if opt.SendAs != nil {
 		req.SendAs = opt.SendAs
+	}
+	if opt.RichMessage != nil {
+		req.RichMessage = opt.RichMessage
 	}
 
 	rpc := c.Raw()
@@ -401,6 +411,9 @@ func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID in
 	if opt.InvertMedia {
 		flags.Set(16)
 	}
+	if opt.RichMessage != nil {
+		flags.Set(23)
+	}
 
 	req := &tg.MessagesEditMessageRequest{
 		Flags:       flags,
@@ -410,6 +423,9 @@ func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID in
 		Message:     sendText,
 		ReplyMarkup: opt.ReplyMarkup,
 		Entities:    entities,
+	}
+	if opt.RichMessage != nil {
+		req.RichMessage = opt.RichMessage
 	}
 	if opt.ScheduleDate != nil {
 		req.ScheduleDate = *opt.ScheduleDate

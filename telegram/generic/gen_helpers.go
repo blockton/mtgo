@@ -550,6 +550,15 @@ func GetProfilePhotos[T PeerInput, C Caller](c C, user T, opts ...*telegram.GetP
 	return client.GetProfilePhotos(ctx, userID, opts...)
 }
 
+func GetRichMessage[T PeerInput, C Caller](c C, chat T, messageID int32) (*tg.RichMessage, error) {
+	client, ctx := extractClient(c)
+	chatID, err := resolveID[T](ctx, client, chat)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetRichMessage(ctx, chatID, messageID)
+}
+
 func GetSendAsChats[T PeerInput, C Caller](c C, chat T) ([]*types.Chat, error) {
 	client, ctx := extractClient(c)
 	chatID, err := resolveID[T](ctx, client, chat)
@@ -973,6 +982,33 @@ func SendReaction[T PeerInput, C Caller](c C, chat T, messageID int32, reactions
 	return client.SendReaction(ctx, chatID, messageID, reactions, opts...)
 }
 
+func SendRichMessage[T PeerInput, C Caller](c C, chat T, rm tg.InputRichMessageClass, opts ...*params.SendMessage) (*types.Message, error) {
+	client, ctx := extractClient(c)
+	chatID, err := resolveID[T](ctx, client, chat)
+	if err != nil {
+		return nil, err
+	}
+	return client.SendRichMessage(ctx, chatID, rm, opts...)
+}
+
+func SendRichMessageHTML[T PeerInput, C Caller](c C, chat T, html string, opts ...*params.SendMessage) (*types.Message, error) {
+	client, ctx := extractClient(c)
+	chatID, err := resolveID[T](ctx, client, chat)
+	if err != nil {
+		return nil, err
+	}
+	return client.SendRichMessageHTML(ctx, chatID, html, opts...)
+}
+
+func SendRichMessageMarkdown[T PeerInput, C Caller](c C, chat T, markdown string, opts ...*params.SendMessage) (*types.Message, error) {
+	client, ctx := extractClient(c)
+	chatID, err := resolveID[T](ctx, client, chat)
+	if err != nil {
+		return nil, err
+	}
+	return client.SendRichMessageMarkdown(ctx, chatID, markdown, opts...)
+}
+
 func SendSticker[T PeerInput, C Caller](c C, chat T, file *telegram.InputFile, opts ...*params.SendSticker) (*types.Message, error) {
 	client, ctx := extractClient(c)
 	chatID, err := resolveID[T](ctx, client, chat)
@@ -1133,6 +1169,24 @@ func SetSlowMode[T PeerInput, C Caller](c C, chat T, seconds int) error {
 		return err
 	}
 	return client.SetSlowMode(ctx, chatID, seconds)
+}
+
+func StartMessageDraft[T PeerInput, C Caller](c C, chat T, opts ...*telegram.DraftOpts) (*telegram.MessageDraft, error) {
+	client, ctx := extractClient(c)
+	chatID, err := resolveID[T](ctx, client, chat)
+	if err != nil {
+		return nil, err
+	}
+	return client.StartMessageDraft(ctx, chatID, opts...)
+}
+
+func StartRichMessageDraft[T PeerInput, C Caller](c C, chat T, opts ...*telegram.DraftOpts) (*telegram.RichMessageDraft, error) {
+	client, ctx := extractClient(c)
+	chatID, err := resolveID[T](ctx, client, chat)
+	if err != nil {
+		return nil, err
+	}
+	return client.StartRichMessageDraft(ctx, chatID, opts...)
 }
 
 func StopPoll[T PeerInput, C Caller](c C, chat T, messageID int32) error {

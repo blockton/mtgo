@@ -33,6 +33,9 @@ type Binder interface {
 	// BoundSend sends a text message to the given chat, optionally replying to
 	// another message identified by replyTo.
 	BoundSend(chatID int64, text string, replyTo int32, opts ...*params.SendMessage) (*Message, error)
+	// BoundSendRich sends a rich message to the given chat, optionally replying
+	// to another message identified by replyTo.
+	BoundSendRich(chatID int64, rm tg.InputRichMessageClass, replyTo int32, opts ...*params.SendMessage) (*Message, error)
 	// BoundSendMedia uploads or re-sends media to the given chat with an optional
 	// caption and reply-to reference.
 	BoundSendMedia(chatID int64, media tg.InputMediaClass, caption string, replyTo int32, opts ...*params.SendMessage) (*Message, error)
@@ -56,6 +59,11 @@ type Binder interface {
 	BoundEditReplyMarkup(chatID int64, msgID int32, markup tg.ReplyMarkupClass) (*Message, error)
 	// BoundEditInlineReplyMarkup changes only the inline keyboard of an inline message.
 	BoundEditInlineReplyMarkup(inlineMessageID tg.InputBotInlineMessageIDClass, markup tg.ReplyMarkupClass) (bool, error)
+	// BoundEditRich replaces the text of an existing message with a rich message.
+	BoundEditRich(chatID int64, msgID int32, rm tg.InputRichMessageClass) (*Message, error)
+	// BoundEditInlineRich replaces the content of an inline message with a rich
+	// message.
+	BoundEditInlineRich(inlineMessageID tg.InputBotInlineMessageIDClass, rm tg.InputRichMessageClass) (bool, error)
 	// BoundDelete removes one or more messages by their IDs.
 	BoundDelete(chatID int64, msgIDs []int32, opts ...*params.DeleteMessages) (int, error)
 	// BoundReact adds an emoji reaction to a message.

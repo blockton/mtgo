@@ -2,7 +2,9 @@ package telegram
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/mtgo-labs/mtgo/telegram/params"
 	"github.com/mtgo-labs/mtgo/tg"
 )
 
@@ -17,6 +19,18 @@ func (c *Client) EditInlineText(ctx context.Context, inlineMessageID tg.InputBot
 	c.Log.Debugf("EditInlineText")
 	opt := getEditInlineOpts(opts...)
 
+	// Parse formatted text when no pre-built entities are provided.
+	sendText := text
+	var parsedEntities []tg.MessageEntityClass
+	if len(opt.Entities) == 0 {
+		parsed, entities, err := c.parseText(text, opt.ParseMode)
+		if err != nil {
+			return false, fmt.Errorf("parse text: %w", err)
+		}
+		sendText = parsed
+		parsedEntities = entities
+	}
+
 	var flags tg.Fields
 	if opt.NoWebpage {
 		flags.Set(1)
@@ -30,8 +44,15 @@ func (c *Client) EditInlineText(ctx context.Context, inlineMessageID tg.InputBot
 	if opt.ReplyMarkup != nil {
 		flags.Set(2)
 	}
-	if len(opt.Entities) > 0 {
+	entities := opt.Entities
+	if len(entities) == 0 {
+		entities = parsedEntities
+	}
+	if len(entities) > 0 {
 		flags.Set(3)
+	}
+	if opt.RichMessage != nil {
+		flags.Set(23)
 	}
 
 	req := &tg.MessagesEditInlineBotMessageRequest{
@@ -39,12 +60,18 @@ func (c *Client) EditInlineText(ctx context.Context, inlineMessageID tg.InputBot
 		NoWebpage:   opt.NoWebpage,
 		InvertMedia: opt.InvertMedia,
 		ID:          inlineMessageID,
-		Message:     text,
+		Message:     sendText,
 		ReplyMarkup: opt.ReplyMarkup,
-		Entities:    opt.Entities,
+		Entities:    entities,
+	}
+	if opt.RichMessage != nil {
+		req.RichMessage = opt.RichMessage
 	}
 
-	rpc := c.Raw()
+	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
+	if err != nil {
+		return false, err
+	}
 	result, err := rpc.MessagesEditInlineBotMessage(ctx, req)
 	if err != nil {
 		return false, err
@@ -61,6 +88,18 @@ func (c *Client) EditInlineCaption(ctx context.Context, inlineMessageID tg.Input
 	c.Log.Debugf("EditInlineCaption")
 	opt := getEditInlineOpts(opts...)
 
+	// Parse formatted caption when no pre-built entities are provided.
+	sendCaption := caption
+	var parsedEntities []tg.MessageEntityClass
+	if len(opt.Entities) == 0 {
+		parsed, entities, err := c.parseText(caption, opt.ParseMode)
+		if err != nil {
+			return false, fmt.Errorf("parse caption: %w", err)
+		}
+		sendCaption = parsed
+		parsedEntities = entities
+	}
+
 	var flags tg.Fields
 	flags.Set(11)
 	if opt.InvertMedia {
@@ -69,16 +108,33 @@ func (c *Client) EditInlineCaption(ctx context.Context, inlineMessageID tg.Input
 	if opt.ReplyMarkup != nil {
 		flags.Set(2)
 	}
+	entities := opt.Entities
+	if len(entities) == 0 {
+		entities = parsedEntities
+	}
+	if len(entities) > 0 {
+		flags.Set(3)
+	}
+	if opt.RichMessage != nil {
+		flags.Set(23)
+	}
 
 	req := &tg.MessagesEditInlineBotMessageRequest{
 		Flags:       flags,
 		InvertMedia: opt.InvertMedia,
 		ID:          inlineMessageID,
-		Message:     caption,
+		Message:     sendCaption,
 		ReplyMarkup: opt.ReplyMarkup,
+		Entities:    entities,
+	}
+	if opt.RichMessage != nil {
+		req.RichMessage = opt.RichMessage
 	}
 
-	rpc := c.Raw()
+	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
+	if err != nil {
+		return false, err
+	}
 	result, err := rpc.MessagesEditInlineBotMessage(ctx, req)
 	if err != nil {
 		return false, err
@@ -113,7 +169,10 @@ func (c *Client) EditInlineMedia(ctx context.Context, inlineMessageID tg.InputBo
 		ReplyMarkup: opt.ReplyMarkup,
 	}
 
-	rpc := c.Raw()
+	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
+	if err != nil {
+		return false, err
+	}
 	result, err := rpc.MessagesEditInlineBotMessage(ctx, req)
 	if err != nil {
 		return false, err
@@ -139,7 +198,48 @@ func (c *Client) EditInlineReplyMarkup(ctx context.Context, inlineMessageID tg.I
 		ReplyMarkup: replyMarkup,
 	}
 
-	rpc := c.Raw()
+	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
+	if err != nil {
+		return false, err
+	}
+	result, err := rpc.MessagesEditInlineBotMessage(ctx, req)
+	if err != nil {
+		return false, err
+	}
+	return result, nil
+}
+
+// EditInlineRichMessage replaces the content of an inline message with a rich
+// message (Bot API 10.1 InputRichMessageContent editing).
+//
+// Example:
+//
+//	ok, err := client.EditInlineRichMessage(ctx, inlineMsgID,
+//		telegram.RichMessageMarkdown("**updated**", false))
+func (c *Client) EditInlineRichMessage(ctx context.Context, inlineMessageID tg.InputBotInlineMessageIDClass, rm tg.InputRichMessageClass, opts ...*EditInlineOpts) (bool, error) {
+	c.Log.Debugf("EditInlineRichMessage")
+	if rm == nil {
+		return false, fmt.Errorf("edit inline rich message: rich message is nil")
+	}
+	opt := getEditInlineOpts(opts...)
+
+	var flags tg.Fields
+	flags.Set(23)
+	if opt.ReplyMarkup != nil {
+		flags.Set(2)
+	}
+
+	req := &tg.MessagesEditInlineBotMessageRequest{
+		Flags:       flags,
+		ID:          inlineMessageID,
+		ReplyMarkup: opt.ReplyMarkup,
+		RichMessage: rm,
+	}
+
+	rpc, err := c.inlineEditRPC(ctx, inlineMessageID)
+	if err != nil {
+		return false, err
+	}
 	result, err := rpc.MessagesEditInlineBotMessage(ctx, req)
 	if err != nil {
 		return false, err
@@ -162,6 +262,11 @@ type EditInlineOpts struct {
 	InvertMedia bool
 	ReplyMarkup tg.ReplyMarkupClass
 	Entities    []tg.MessageEntityClass
+	// ParseMode parses the text/caption into entities when Entities is empty.
+	ParseMode params.ParseMode
+	// RichMessage replaces the inline message content with a rich message
+	// (flag 23).
+	RichMessage tg.InputRichMessageClass
 }
 
 func getEditInlineOpts(opts ...*EditInlineOpts) *EditInlineOpts {
@@ -169,4 +274,30 @@ func getEditInlineOpts(opts ...*EditInlineOpts) *EditInlineOpts {
 		return &EditInlineOpts{}
 	}
 	return opts[0]
+}
+
+// inlineMessageDC extracts the origin DC encoded in an inline message ID.
+// Telegram requires messages.editInlineBotMessage to be invoked on that DC:
+// edits sent to any other DC fail with MESSAGE_ID_INVALID instead of a 303
+// migration error, so the routing cannot be recovered reactively.
+func inlineMessageDC(inlineMessageID tg.InputBotInlineMessageIDClass) (int32, bool) {
+	switch id := inlineMessageID.(type) {
+	case *tg.InputBotInlineMessageID:
+		return id.DCID, true
+	case *tg.InputBotInlineMessageID64:
+		return id.DCID, true
+	default:
+		return 0, false
+	}
+}
+
+// inlineEditRPC returns the RPC client for the DC hosting the inline message.
+// Foreign-DC edits use an auxiliary authorized session; same-DC edits (or IDs
+// without a usable DC) use the main invoker.
+func (c *Client) inlineEditRPC(ctx context.Context, inlineMessageID tg.InputBotInlineMessageIDClass) (*tg.RPCClient, error) {
+	dcID, ok := inlineMessageDC(inlineMessageID)
+	if !ok || dcID <= 0 {
+		return c.Raw(), nil
+	}
+	return c.dcRPC(ctx, int(dcID))
 }
